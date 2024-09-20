@@ -46,11 +46,16 @@ pip install qpsolvers['cvxopt']
 
 ### 1. Create Reference Distribution
 
+GuaCAMOLE relies on the library.fna files downloaded by Kraken2 to generate the reference distributions. The Kraken2 database needs to be downloaded with the ```--no-masking``` option with the ```kraken2-build``` command!
+
 To create a GC reference distribution from a Kraken2 database, run:
 
 ```bash
+
 create-reference-dist --lib_path path/to/kraken_db --read_len 150 --fragment_len 400 --ncores 20
 ```
+
+For GuaCAMOLE to run it also requires a Bracken database with the correct read length to exist in the Kraken database folder.
 
 ### 2. Run GuaCAMOLE for Species Abundance Estimation
 
