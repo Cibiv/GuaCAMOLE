@@ -4,15 +4,15 @@ setup(
     name='guacamole',
     version='0.1.0',
     author='Your Name',  # Replace with your name
-    author_email='your.email@example.com',  # Replace with your email
+    author_email='laurenz.holcik@univie.ac.at',  # Replace with your email
     description='GC-aware species abundance estimation from metagenomic data.',
     long_description='This project implements GuaCAMOLE, a tool for species abundance estimation from metagenomic data.',
     long_description_content_type='text/markdown',
-    url='https://github.com/yourusername/guacamole',  # Replace with your GitHub repository
+    url='https://github.com/cibiv/guacamole',  # Replace with your GitHub repository
     packages=find_packages(),  # Automatically find packages in your project
     install_requires=[
         'pandas',
-        'numpy==1.26.4',
+        'numpy>=1.23.0,<1.25',
         'matplotlib',
         'seaborn',
         'biopython',
