@@ -227,10 +227,8 @@ def get_genome_length(kraken_db, nbin, lvl_taxids, map2lvl_taxids, est_reads_dct
     return lengths_out / np.sum(lengths_out)
 
 
-def main(fastq1, fastq2, kraken, kraken_db, report, output, read_len, length_correction=False,
-         plot=False, threshold=500, level='S', reg_weight=0.01, quantiles=None, fragment_len=None,
-         fp_cycles=4, fasta=False):
-    """
+def main():
+    
     parser = argparse.ArgumentParser(
         description='Run GuaCAMOLE for GC aware species abundance estimation from metagenomic data')
 
@@ -249,7 +247,7 @@ def main(fastq1, fastq2, kraken, kraken_db, report, output, read_len, length_cor
     parser.add_argument('--plot', metavar='plot', type=bool, help='True if detailed plots should be generated',
                         default=False)
     parser.add_argument('--fp_cycles', metavar='fp_cycles', type=int,
-                        help='Number of iterations for false positive removal', default=3)
+                        help='Number of iterations for false positive removal', default=4)
     parser.add_argument('--reg_weight', metavar='reg_weight', type=float,
                         help='Determines how strong the regularization should be [between 0 and 1]', default=0.01)
     parser.add_argument('--fragment_len', metavar='fragment_len', type=int,
@@ -257,7 +255,7 @@ def main(fastq1, fastq2, kraken, kraken_db, report, output, read_len, length_cor
     parser.add_argument('--fasta', metavar='fasta', type=bool, help='True if reads are in fasta format, false if fastq',
                         default=False)
     parser.add_argument('--quantiles', metavar='quantiles', type=float,
-                        help='min and max quantiles of reads that should be used for GC distributions', nargs=2)
+                        help='min and max quantiles of reads that should be used for GC distributions', nargs=2, default=[0.025, 0.975])
 
 
     args = parser.parse_args()
@@ -282,7 +280,6 @@ def main(fastq1, fastq2, kraken, kraken_db, report, output, read_len, length_cor
     elif len(args.read_files) == 1:
         fastq1 = args.read_files[0]
         fastq2 = None
-    """
 
     nbin = 100
     kmer_distr = os.path.join(kraken_db, 'database' + str(read_len) + 'mers.kmer_distrib')
@@ -615,10 +612,11 @@ def main(fastq1, fastq2, kraken, kraken_db, report, output, read_len, length_cor
     })
     ab_df.set_index('taxid', inplace=True, drop=False)
 
+    lib.plot_dist2(norm / ab, line=True)
+    plt.savefig('obs_vs_exp_minimized.pdf')
+    plt.close()
+
     if plot:
-        lib.plot_dist2(norm / ab, line=True)
-        plt.savefig('corrected_std.pdf')
-        plt.close()
         lib.plot_dist2((norm / ab) * ab, line=True)
         plt.savefig('obs_vs_exp_wo_outliers.pdf')
         plt.close()
@@ -675,7 +673,5 @@ def main(fastq1, fastq2, kraken, kraken_db, report, output, read_len, length_cor
     tdelta = datetime.strptime(time_end, "%m-%d-%Y %H:%M:%S") - datetime.strptime(time_start, "%m-%d-%Y %H:%M:%S")
     print("DURATION: " + str(tdelta.total_seconds()) + " seconds")
 
-"""
 if __name__ == "__main__":
     main()
-"""

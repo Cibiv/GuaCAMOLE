@@ -331,6 +331,13 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
             }
         )
 
+        if threshold == final_threshold and len(ind_skip) == 0:
+            if plot:
+                residual_plot(res_array=cov_rel[:, ind], taxids=taxids[ind], threshold_plot=None)
+                plt.savefig('residuals_final.pdf')
+                plt.close()
+            break
+
         rep += 1
         if threshold > final_threshold and len(ind_skip) == 0:
             iteration += 1
