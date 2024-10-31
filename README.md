@@ -80,3 +80,41 @@ The Output is the same as the tab-delimited Bracken output file. Three additiona
 - `GuaCAMOLE_estimate`, the abundances estimated using the abundance parameter from the GuaCAMOLE algorithm
 - `GuaCMAOLE_est_eff`, the abundances computed using the estimated efficiencies by GuaCAMOLE (this does also include esimates for the taxa that were labelled as false positives by GuaCAMOLE)
 - `GC_content`, the GC content of the taxon's genome
+
+### Demo
+
+To try out GuaCAMOLE you can download the fastq files of one of the replicates of the sample `GH` sequenced for a publication by Tourlouss et al. (2021) (for more details see their and our manuscripts). To download the data install `sra-tools` and run:
+
+```bash
+fasterq-dump SRR12996167
+```
+
+You need to have a kraken2 database installed with the `--no-masking` flag set. Download the Kraken2 database using:
+
+```bash
+kraken2-build --standard --db demo --threads 24 --no-masking
+```
+
+Now you can classify the reads using
+
+```bash
+kraken2 --db standard --threads 24 --report SRR12996167_report.txt --paired SRR12996167_1.fastq SRR12996167_2.fastq > SRR12996167.kraken
+```
+
+Then build a Bracken database for the read length of the sequencing data which is 150 bp:
+
+```bash
+bracken-build -d standard -t 24 -l 150 
+```
+
+Now build a GuaCAMOLE database for the corresponding read and fragment length (should take around an hour):
+
+```bash
+crate_reference_dist --lib_path standard --read_len 150 --ncores 24 --fragment_len 300
+```
+
+Now run GuaCAMOLE using (should take around 20 minutes):
+
+```bash
+guacamole --kraken_report SRR12996167_report.txt --kraken_file SRR12996167.kraken --kraken_db standard --read_len 150 fragment_len 150 --length_correction True --output SRR12996167_guacamole.out --read_files SRR12996167_1.fastq SRR12996167_2.fastq
+```
