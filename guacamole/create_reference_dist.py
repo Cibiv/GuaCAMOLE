@@ -78,7 +78,7 @@ def main():
         description='Create reference distributions with given read length and possibly fragment length to run GuaCAMOLE')
 
     parser.add_argument('--lib_path', metavar='lib_path', type=str, help='Path to Kraken2 database')
-    parser.add_argument('--read_len', metavar='read_len', type=str, help='read length')
+    parser.add_argument('--read_len', metavar='read_len', type=int, help='read length')
     parser.add_argument('--ncores', metavar='ncores', type=int, help='number of threads')
     parser.add_argument('--fragment_len', metavar='fragment_len', type=int, help='fragment length', default=None)
     args = parser.parse_args()
@@ -142,9 +142,9 @@ def main():
     if old_gc_dist is not None:
         df = pd.concat([old_df.loc[old_df['seqids'].isin(old_seqids), :], df], axis=0)
     if fragment_len is not None:
-        df.to_csv(os.path.join(lib_path, 'gc_bin_' + str(nbin) + '_kmer_'+ str(read_len) + '_insert_' + str(insert) + '_dist.csv'))
+        df.to_csv('gc_bin_' + str(nbin) + '_kmer_'+ str(read_len) + '_insert_' + str(insert) + '_dist.csv')
     else:
-        df.to_csv(os.path.join(lib_path, 'gc_bin_' + str(nbin) + '_kmer_'+ str(read_len) + '_dist.csv'))
+        df.to_csv('gc_bin_' + str(nbin) + '_kmer_'+ str(read_len) + '_dist.csv')
 
 if __name__ == "__main__":
     main()

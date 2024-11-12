@@ -110,7 +110,7 @@ bracken-build -d standard -t 24 -l 150
 Now build a GuaCAMOLE database for the corresponding read and fragment length (should take around an hour):
 
 ```bash
-crate_reference_dist --lib_path standard --read_len 150 --ncores 24 --fragment_len 300
+crate-reference-dist --lib_path standard --read_len 150 --ncores 20 --fragment_len 300
 ```
 
 Now run GuaCAMOLE using (should take around 20 minutes):
