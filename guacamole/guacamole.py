@@ -577,12 +577,16 @@ def main():
                                     map2lvl_taxids=map2lvl_taxids)
         refdists = refdists * lengths
 
-    if np.any(np.isnan(s_dists.sum(0))):
+    # sometimes no genome exists even though reads map there, this results in nans in GuaCAMOLE,
+    # can still be corrected via efficiencies
+    nan_taxids = np.array(cols_sorted)[np.isnan(s_dists.sum(0))]
+    if len(nan_taxids) != 0:
         non_nan = np.argwhere(~np.isnan(s_dists.sum(0)))
         non_nan = non_nan.reshape((non_nan.shape[0],))
         s_dists = s_dists[:, non_nan]
         refdists = refdists[:, non_nan]
         cols_sorted = np.array(cols_sorted)[non_nan]
+        ref_normalized = ref_normalized[:, non_nan]
         if length_correction:
             lengths = lengths[non_nan]
 
@@ -601,37 +605,64 @@ def main():
         plt.close()
 
     ab, taxon_removal_cycle, efficiencies = lib.corrected_abundances('sample_bin_' + str(nbin) + '_input.dist',
-                                                           'ref_bin_' + str(nbin) + '_input.dist', fp_cycles=fp_cycles,
-                                                           taxids=cols_sorted, plot=plot, reg_weight=reg_weight)
+                                                                     'ref_bin_' + str(nbin) + '_input.dist',
+                                                                     fp_cycles=fp_cycles,
+                                                                     taxids=cols_sorted, plot=plot,
+                                                                     reg_weight=reg_weight)
 
-    ab[np.isinf(ab)] = 0
-    ab_df = pd.DataFrame({
-        'abundance_ls': ab,
-        'taxid': cols_sorted,
-        'taxon_removal_cycle': taxon_removal_cycle
-    })
-    ab_df.set_index('taxid', inplace=True, drop=False)
+    ab[np.isinf(ab)] = np.nan
 
     # Include Bracken estimates
     # Sum all of the reads for the desired level -- use for fraction of reads
     sum_all_reads = 0
     ab_br = []
-    for taxid in ab_df['taxid']:
+    for taxid in cols_sorted:
         [name, all_reads, lvl_reads, added_reads] = lvl_taxids[str(taxid)]
         sum_all_reads += float(added_reads)
         ab_br.append(float(added_reads))
 
-    ab_df['abundance_br'] = [reads / sum_all_reads for reads in ab_br]
+    bracken_ab = [reads / sum_all_reads for reads in ab_br]
 
     if length_correction:
-        corr_ab = ab_df['abundance_br'] / lengths
-        ab_df['abundance_br'] = corr_ab / np.sum(corr_ab)
+        corr_ab = bracken_ab / lengths
+        bracken_ab = corr_ab / np.sum(corr_ab)
+        if len(nan_taxids) != 0:
+            print(f"ERROR: For taxid(s) {nan_taxids} reference distributions could not be created"
+                  f"(known bug), therefore length"
+                  f" correction is not possible. Please re-run with length_correction set to False.")
 
-    naive_ab = ab_df['abundance_br']
+    avg_eff = np.matmul(ref_normalized.T, efficiencies.reshape(101, 1)).flatten()
+    ab_efficiencies = (bracken_ab / avg_eff) / np.sum(bracken_ab / avg_eff)
+    gc_content = np.argmax(ref_normalized, axis=0)
 
-    avg_eff = np.matmul(ref_normalized.T, efficiencies.reshape(101, 1)).flatten() / ref_normalized.sum(0)
-    ab_df['abundance_eff'] = (naive_ab / avg_eff) / np.sum(naive_ab / avg_eff)
-    ab_df['GC content'] = np.argmax(ref_normalized, axis=0)
+    if len(nan_taxids) != 0:
+        print(f"WARNING: For taxid(s) {nan_taxids} reference distributions could not be created, therefore GuaCAMOLE"
+              f" estimtates are set to nan for those!")
+        ab = np.append(ab, np.repeat(np.nan, len(nan_taxids)))
+        cols_sorted = np.append(cols_sorted, nan_taxids)
+        taxon_removal_cycle = np.append(taxon_removal_cycle, np.repeat(np.nan, len(nan_taxids)))
+        ab_efficiencies = np.append(ab_efficiencies, np.repeat(np.nan, len(nan_taxids)))
+        gc_content = np.append(gc_content, np.repeat(np.nan, len(nan_taxids)))
+
+        sum_all_reads = 0
+        ab_br = []
+        for taxid in cols_sorted:
+            [name, all_reads, lvl_reads, added_reads] = lvl_taxids[str(taxid)]
+            sum_all_reads += float(added_reads)
+            ab_br.append(float(added_reads))
+
+        bracken_ab = [reads / sum_all_reads for reads in ab_br]
+
+
+    ab_df = pd.DataFrame({
+        'abundance_ls': ab,
+        'abundance_br': bracken_ab,
+        'taxid': cols_sorted,
+        'taxon_removal_cycle': taxon_removal_cycle,
+        'GC content': gc_content,
+        'abundance_eff': ab_efficiencies
+    })
+    ab_df.set_index('taxid', inplace=True, drop=False)
 
     # Identify taxa with zero (or near-zero) GuaCAMOLE abundance
     zero_guacamole_taxa_df = ab_df[ab_df['abundance_ls'] <= 1e-9]
@@ -661,11 +692,11 @@ def main():
 
     for taxid in lvl_taxids:
         [name, all_reads, lvl_reads, added_reads] = lvl_taxids[taxid]
-        #Count up all added reads + all_reads already at the level
+        # Count up all added reads + all_reads already at the level
         new_all_reads = float(all_reads) + float(added_reads)
 
         bracken_est_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_br'].iloc[0])
-        taxon_removal_cycle_val = int(ab_df.loc[ab_df['taxid'] == int(taxid), 'taxon_removal_cycle'].iloc[0])
+        taxon_removal_cycle_val = str(ab_df.loc[ab_df['taxid'] == int(taxid), 'taxon_removal_cycle'].iloc[0])
         if excessive_removal_detected:
             guacamole_ls_est_val = np.nan
             guacamole_eff_est_val = np.nan
@@ -676,14 +707,14 @@ def main():
 
         gc_content_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'GC content'].iloc[0])
 
-        #Output
+        # Output
         o_file.write(name + '\t')
         o_file.write(taxid + '\t')
         o_file.write(level + '\t')
         o_file.write(str(int(all_reads)) + '\t')
-        o_file.write(str(int(new_all_reads)-int(all_reads))+'\t')
+        o_file.write(str(int(new_all_reads) - int(all_reads)) + '\t')
         o_file.write(str(int(new_all_reads)) + '\t')
-        o_file.write("%0.5f\t" % (float(int(new_all_reads))/float(int(sum_all_reads))))
+        o_file.write("%0.5f\t" % (float(int(new_all_reads)) / float(int(sum_all_reads))))
         o_file.write("%0.5f\t" % bracken_est_val)
         o_file.write("%0.5f\t" % guacamole_ls_est_val)
         o_file.write("%0.5f\t" % guacamole_eff_est_val)
@@ -695,7 +726,7 @@ def main():
     sys.stdout.write("DONE AT: " + time_end + '\n')
     tdelta = datetime.strptime(time_end, "%m-%d-%Y %H:%M:%S") - datetime.strptime(time_start, "%m-%d-%Y %H:%M:%S")
     print("DURATION: " + str(tdelta.total_seconds()) + " seconds")
-    np.savetxt('duration_time.txt', np.array([str(tdelta.total_seconds())]))
+    np.savetxt('duration_time.txt', np.array([tdelta.total_seconds()]))
 
 
 if __name__ == "__main__":

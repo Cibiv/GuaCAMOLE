@@ -257,48 +257,6 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
     if len(skipped_taxids) != 0:
         print("Removing taxa " + str(skipped_taxids) + " because out of high observed vs. expected read ranges")
 
-    """
-    ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
-    m = get_matrix(norm_dist[:, ind], reg_weight=reg_weight)
-
-    a = scipy.sparse.csc_matrix(np.full((m.shape[0],), 1.))
-    ab = qps.solve_qp(P=m, q=np.zeros(m.shape[0]), A=a, b=np.array([1.]), solver='cvxopt', verbose=False, abstol=1e-15,
-                      reltol=1e-15, lb=np.zeros(m.shape[0]))
-
-    ab = (1 / ab) / np.sum(1 / ab)
-    iteration = 1
-    rep = 1
-    res_range = np.zeros(len(taxids))
-
-    if plot:
-        plt.figure(figsize=cm2inch(20, 13))
-        plt.rcParams.update({'font.size': 16})
-        plot_dist2(norm_dist[:, ind] / ab, line=True)
-        plt.xlabel("GC bin (%)")
-        plt.ylabel("Obs / (Exp*Abundance)")
-        plt.savefig("Obs_vs_Exp_minimized_initial.pdf")
-        plt.close()
-
-    res_range[ind], cov_rel[:, ind], efficiencies = get_residuals(ref_dists=ref_dist[:, ind],
-                                                                  sample_dists=sample_dist[:, ind],
-                                                                  abundances=ab, plot=plot)
-    res_range_new = res_range[ind]
-
-    ind_skip = np.where(res_range_new > threshold)[0]
-    ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
-    skipped_taxids.extend(taxids[ind_skip])
-    taxon_removal_cycle[ind][ind_skip] = iteration
-
-    print("Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
-    print(f"and with threshold {str(threshold)}")
-
-    residual_df = pd.DataFrame(
-        {
-            'taxid': taxids[ind],
-            'res_range': res_range_new
-        }
-    )
-    """
     res_range = np.zeros(len(taxids))
     threshold = 10
     final_threshold = threshold / np.power(2, fp_cycles-1)
