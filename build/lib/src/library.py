@@ -182,7 +182,7 @@ def get_matrix(norm_dist, reg_weight=0.1):
     return scipy.sparse.csc_matrix(b)
 
 
-def get_efficiencies(ref_dists, sample_dists, abundances, iteration=0, plot=False):
+def get_efficiencies(ref_dists, sample_dists, abundances, iteration=None, plot=False):
     np.seterr(divide='ignore')
     lib_size = np.sum(sample_dists)
     r_dists_scaled = abundances * ref_dists / np.sum(abundances * ref_dists)
@@ -195,7 +195,10 @@ def get_efficiencies(ref_dists, sample_dists, abundances, iteration=0, plot=Fals
     s_dists_norm[np.isinf(s_dists_norm)] = 0
     ef_weights = s_dists_norm / np.sum(s_dists_norm, 1).reshape(s_dists_norm.shape[0], 1)
     w_ef = ef * ef_weights
-    filename = 'Efficiencies_it_' + str(iteration)
+    if iteration is None:
+        filename = 'efficiencies'
+    else:
+        filename = 'efficiencies_it_' + str(iteration)
     w_ef[np.isnan(w_ef)] = 0
     w_ef = w_ef.sum(1)
     if plot:
@@ -243,23 +246,15 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
     taxids = np.array(taxids)
     ind = np.arange(0, len(taxids))
     cov_rel = np.zeros(norm_dist.shape)
-    taxon_removal_cycle = np.repeat(np.nan, len(taxids))
 
     ### skip ones with very high range (and zero reads...)
     ind_zero_reads = np.where(np.sum(norm_dist[:, ind], axis=0) == 0)[0]
     skipped_taxids.extend(taxids[ind][ind_zero_reads])
-    taxon_removal_cycle[ind[ind_zero_reads]] = 0
     ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
     norm = norm_dist[:, ind] / norm_dist[:, ind].sum(0)
     avg_range = (np.max(norm, axis=0) - np.min(norm, axis=0)) / (norm != 0).sum(0)
     ind_skip_range = np.where(avg_range > 0.01)[0]
     skipped_taxids.extend(taxids[ind][ind_skip_range])
-    taxon_removal_cycle[ind[ind_skip_range]] = 0
-
-    if len(skipped_taxids) != 0:
-        print("Removing taxa " + str(skipped_taxids) + " because out of high observed vs. expected read ranges")
-
-    """
     ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
     m = get_matrix(norm_dist[:, ind], reg_weight=reg_weight)
 
@@ -268,7 +263,7 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
                       reltol=1e-15, lb=np.zeros(m.shape[0]))
 
     ab = (1 / ab) / np.sum(1 / ab)
-    iteration = 1
+    iteration = 0
     rep = 1
     res_range = np.zeros(len(taxids))
 
@@ -278,21 +273,17 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
         plot_dist2(norm_dist[:, ind] / ab, line=True)
         plt.xlabel("GC bin (%)")
         plt.ylabel("Obs / (Exp*Abundance)")
-        plt.savefig("Obs_vs_Exp_minimized_initial.pdf")
+        plt.savefig("Corrected_it_" + str(iteration) + '_rep_' + str(rep) + ".pdf")
         plt.close()
-
     res_range[ind], cov_rel[:, ind], efficiencies = get_residuals(ref_dists=ref_dist[:, ind],
                                                                   sample_dists=sample_dist[:, ind],
                                                                   abundances=ab, plot=plot)
     res_range_new = res_range[ind]
-    
+    threshold = 10
+    final_threshold = threshold / np.power(2, fp_cycles)
     ind_skip = np.where(res_range_new > threshold)[0]
     ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
     skipped_taxids.extend(taxids[ind_skip])
-    taxon_removal_cycle[ind][ind_skip] = iteration
-
-    print("Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
-    print(f"and with threshold {str(threshold)}")
 
     residual_df = pd.DataFrame(
         {
@@ -300,19 +291,14 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
             'res_range': res_range_new
         }
     )
-    """
-    threshold = 10
-    final_threshold = threshold / np.power(2, fp_cycles)
-    iteration = 1
-    rep = 1
-    ind_skip = []
+    residual_df.to_csv(f'residuals_cycle_{str(iteration)}.csv')
 
     while threshold >= final_threshold or len(ind_skip) != 0:
+        print("Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
+        print(f"and with threshold {str(threshold)}")
 
         ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
-
-        # only re-compute matrix when taxa have been removed or it's initial round
-        if len(ind_skip) != 0 or (iteration == 1 and rep == 1):
+        if len(ind_skip) != 0:
             m = get_matrix(norm_dist[:, ind], reg_weight=reg_weight)
 
         a = scipy.sparse.csc_matrix(np.full((m.shape[0],), 1.))
@@ -327,7 +313,7 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
             plot_dist2(norm_dist[:, ind] / ab, line=True)
             plt.xlabel("GC bin (%)")
             plt.ylabel("Obs / (Exp*Abundance)")
-            plt.savefig("Obs_vs_Exp_minimized_it_" + str(iteration) + '_rep_' + str(rep) + ".pdf")
+            plt.savefig("Corrected_it_" + str(iteration) + '_rep_' + str(rep) + ".pdf")
             plt.close()
 
         res_range_new, cov_rel[:, ind], efficiencies = get_residuals(ref_dists=ref_dist[:, ind],
@@ -338,10 +324,6 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
         res_range[ind] = res_range_new
         ind_skip = np.where(res_range_new > threshold)[0]
         skipped_taxids.extend(taxids[ind][ind_skip])
-        taxon_removal_cycle[ind[ind_skip]] = iteration
-
-        print("Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
-        print(f"and with threshold {str(threshold)}")
 
         residual_df = pd.DataFrame(
             {
@@ -350,12 +332,17 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
             }
         )
 
+
+        if plot:
+            residual_plot(res_array=cov_rel[:, ind], taxids=taxids[ind], threshold_plot=threshold)
+            plt.savefig('residuals_it_' + str(iteration) + '_rep_' + str(rep) + '.pdf')
+            plt.close()
+
         if threshold == final_threshold and len(ind_skip) == 0:
             if plot:
                 residual_plot(res_array=cov_rel[:, ind], taxids=taxids[ind], threshold_plot=None)
-                plt.savefig('Residuals_final.pdf')
+                plt.savefig('residuals_final.pdf')
                 plt.close()
-                os.rename('Efficiencies_it_' + str(iteration) + '.pdf', 'efficiencies_final.pdf')
             break
 
         rep += 1
@@ -364,10 +351,12 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
             threshold = threshold / 2
             rep = 1
 
+        residual_df.to_csv(f'residuals_cycle_{str(iteration)}.csv')
+
     all_ab = np.zeros(len(taxids))
     all_ab[np.where(np.isin(taxids, skipped_taxids, invert=True))[0]] = ab
     all_ab[np.where(np.isin(taxids, skipped_taxids))[0]] = 0
-    return all_ab, taxon_removal_cycle, efficiencies
+    return all_ab, res_range, efficiencies
 
 
 def plot_dist2(dists, color=None, legend=False, line=False, **kwargs):

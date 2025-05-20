@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import Bio.SeqIO as SeqIO
-import guacamole.library as lib
+import library as lib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from math import floor
@@ -227,8 +227,10 @@ def get_genome_length(kraken_db, nbin, lvl_taxids, map2lvl_taxids, est_reads_dct
     return lengths_out / np.sum(lengths_out)
 
 
-def main():
-    
+def main(fastq1, fastq2, kraken, kraken_db, report, output, read_len, length_correction=False,
+         plot=False, threshold=500, level='S', reg_weight=0.01, quantiles=None, fragment_len=None,
+         fp_cycles=4, fasta=False):
+    """
     parser = argparse.ArgumentParser(
         description='Run GuaCAMOLE for GC aware species abundance estimation from metagenomic data')
 
@@ -247,7 +249,7 @@ def main():
     parser.add_argument('--plot', metavar='plot', type=bool, help='True if detailed plots should be generated',
                         default=False)
     parser.add_argument('--fp_cycles', metavar='fp_cycles', type=int,
-                        help='Number of iterations for false positive removal', default=4)
+                        help='Number of iterations for false positive removal', default=3)
     parser.add_argument('--reg_weight', metavar='reg_weight', type=float,
                         help='Determines how strong the regularization should be [between 0 and 1]', default=0.01)
     parser.add_argument('--fragment_len', metavar='fragment_len', type=int,
@@ -255,7 +257,7 @@ def main():
     parser.add_argument('--fasta', metavar='fasta', type=bool, help='True if reads are in fasta format, false if fastq',
                         default=False)
     parser.add_argument('--quantiles', metavar='quantiles', type=float,
-                        help='min and max quantiles of reads that should be used for GC distributions', nargs=2, default=[0.025, 0.975])
+                        help='min and max quantiles of reads that should be used for GC distributions', nargs=2)
 
 
     args = parser.parse_args()
@@ -280,6 +282,7 @@ def main():
     elif len(args.read_files) == 1:
         fastq1 = args.read_files[0]
         fastq2 = None
+    """
 
     nbin = 100
     kmer_distr = os.path.join(kraken_db, 'database' + str(read_len) + 'mers.kmer_distrib')
@@ -600,7 +603,7 @@ def main():
         plt.savefig('Obs_vs_exp_tresh_' + str(threshold) + '.pdf')
         plt.close()
 
-    ab, taxon_removal_cycle, efficiencies = lib.corrected_abundances('sample_bin_' + str(nbin) + '_input.dist',
+    ab, residuals, efficiencies = lib.corrected_abundances('sample_bin_' + str(nbin) + '_input.dist',
                                                            'ref_bin_' + str(nbin) + '_input.dist', fp_cycles=fp_cycles,
                                                            taxids=cols_sorted, plot=plot, reg_weight=reg_weight)
 
@@ -608,10 +611,17 @@ def main():
     ab_df = pd.DataFrame({
         'abundance_ls': ab,
         'taxid': cols_sorted,
-        'taxon_removal_cycle': taxon_removal_cycle
+        'residuals': residuals
     })
     ab_df.set_index('taxid', inplace=True, drop=False)
 
+    if plot:
+        lib.plot_dist2(norm / ab, line=True)
+        plt.savefig('corrected_std.pdf')
+        plt.close()
+        lib.plot_dist2((norm / ab) * ab, line=True)
+        plt.savefig('obs_vs_exp_wo_outliers.pdf')
+        plt.close()
     # Include Bracken estimates
     # Sum all of the reads for the desired level -- use for fraction of reads
     sum_all_reads = 0
@@ -628,54 +638,24 @@ def main():
         ab_df['abundance_br'] = corr_ab / np.sum(corr_ab)
 
     naive_ab = ab_df['abundance_br']
+    efficiencies = efficiencies / np.max(efficiencies)
+    np.savetxt('efficiencies.txt', efficiencies)
 
     avg_eff = np.matmul(ref_normalized.T, efficiencies.reshape(101, 1)).flatten() / ref_normalized.sum(0)
     ab_df['abundance_eff'] = (naive_ab / avg_eff) / np.sum(naive_ab / avg_eff)
     ab_df['GC content'] = np.argmax(ref_normalized, axis=0)
 
-    # Identify taxa with zero (or near-zero) GuaCAMOLE abundance
-    zero_guacamole_taxa_df = ab_df[ab_df['abundance_ls'] <= 1e-9]
-
-    # Sum their Bracken relative abundances
-    removed_fraction_bracken = zero_guacamole_taxa_df['abundance_br'].sum()
-
-    excessive_removal_detected = False
-    if removed_fraction_bracken > 0.50:
-        excessive_removal_detected = True
-        warning_message = (
-            f"WARNING: GuaCAMOLE assigned zero abundance to taxa representing "
-            f"{removed_fraction_bracken * 100:.2f}% of the Bracken-estimated abundance. "
-            "This likely indicates a mismatch between sample and reference genomes or other issues. "
-            "GuaCAMOLE abundance and efficiency estimates may be unreliable and are reported as NaN."
-        )
-        print(warning_message, file=sys.stderr)  # Print to standard error
-    else:
-        efficiencies = efficiencies / np.max(efficiencies)
-        np.savetxt('efficiencies.txt', efficiencies)
-
     ## write output
     o_file = open(output, 'w')
     o_file.write('name\t' + 'taxonomy_id\t' + 'taxonomy_lvl\t' + 'kraken_assigned_reads\t' + 'added_reads\t' +
                  'new_est_reads\t' + 'fraction_total_reads\t' + 'Bracken_estimate\t' + 'GuaCAMOLE_estimate\t' +
-                 'GuaCAMOLE_est_eff\t' + 'GC content\n' + 'Taxon Removal Cycle\n')
+                 'GuaCAMOLE_est_eff\t' + 'GC content\n')
 
     for taxid in lvl_taxids:
         [name, all_reads, lvl_reads, added_reads] = lvl_taxids[taxid]
         #Count up all added reads + all_reads already at the level
         new_all_reads = float(all_reads) + float(added_reads)
-
-        bracken_est_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_br'].iloc[0])
-        taxon_removal_cycle_val = int(ab_df.loc[ab_df['taxid'] == int(taxid), 'taxon_removal_cycle'].iloc[0])
-        if excessive_removal_detected:
-            guacamole_ls_est_val = np.nan
-            guacamole_eff_est_val = np.nan
-        else:
-            # Get GuaCAMOLE estimates (original logic)
-            guacamole_ls_est_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_ls'].iloc[0])
-            guacamole_eff_est_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_eff'].iloc[0])
-
-        gc_content_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'GC content'].iloc[0])
-
+        #new_all_reads = float(added_reads)
         #Output
         o_file.write(name + '\t')
         o_file.write(taxid + '\t')
@@ -684,19 +664,18 @@ def main():
         o_file.write(str(int(new_all_reads)-int(all_reads))+'\t')
         o_file.write(str(int(new_all_reads)) + '\t')
         o_file.write("%0.5f\t" % (float(int(new_all_reads))/float(int(sum_all_reads))))
-        o_file.write("%0.5f\t" % bracken_est_val)
-        o_file.write("%0.5f\t" % guacamole_ls_est_val)
-        o_file.write("%0.5f\t" % guacamole_eff_est_val)
-        o_file.write("%2.0f\t" % gc_content_val)
-        o_file.write(str(taxon_removal_cycle_val) + '\n')
+        o_file.write("%0.5f\t" % (float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_br'].iloc[0])))
+        o_file.write("%0.5f\t" % (float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_ls'].iloc[0])))
+        o_file.write("%0.5f\t" % (float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_eff'].iloc[0])))
+        o_file.write("%2.0f\n" % (float(ab_df.loc[ab_df['taxid'] == int(taxid), 'GC content'].iloc[0])))
     o_file.close()
 
     time_end = strftime("%m-%d-%Y %H:%M:%S", localtime())
     sys.stdout.write("DONE AT: " + time_end + '\n')
     tdelta = datetime.strptime(time_end, "%m-%d-%Y %H:%M:%S") - datetime.strptime(time_start, "%m-%d-%Y %H:%M:%S")
     print("DURATION: " + str(tdelta.total_seconds()) + " seconds")
-    np.savetxt('duration_time.txt', np.array([str(tdelta.total_seconds())]))
 
-
+"""
 if __name__ == "__main__":
     main()
+"""

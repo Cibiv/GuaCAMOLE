@@ -1,0 +1,17 @@
+Metadata-Version: 2.1
+Name: guacamole
+Version: 0.1.0
+Summary: GC-aware species abundance estimation from metagenomic data.
+Home-page: https://github.com/cibiv/guacamole
+Author: Laurenz Holcik
+Author-email: laurenz.holcik@univie.ac.at
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3.10
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: Linux
+Requires-Python: >=3.10
+License-File: COPYING
+
+This project implements GuaCAMOLE, a tool for species abundance estimation from metagenomic data.
+
