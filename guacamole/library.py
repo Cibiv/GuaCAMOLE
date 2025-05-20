@@ -119,7 +119,7 @@ def get_beta(norm_dist, org1, org2, all_overlaps, reg_weight=0.1):
                                 2 * norm_dist[bin_i, org1] * norm_dist[bin_j, org2] / (n_b[bin_i] * n_b[bin_j]))
                                * rbf(bin_i, bin_j))
 
-    return (1-reg_weight) * first_term / float(norm_dist.shape[1]**2) + regularization * reg_weight
+    return (1 - reg_weight) * first_term / float(norm_dist.shape[1] ** 2) + regularization * reg_weight
 
 
 def get_alpha(norm_dist, org, all_overlaps, reg_weight=0.1):
@@ -151,7 +151,7 @@ def get_alpha(norm_dist, org, all_overlaps, reg_weight=0.1):
             reg_ij -= (2 * norm_dist[bin_i, org] * norm_dist[bin_j, org]) / (n_b[bin_i] * n_b[bin_j])
             regularization += reg_ij * rbf(bin_i, bin_j)
 
-    return (1-reg_weight) * inner_sum / float(norm_dist.shape[1]**2) + regularization * reg_weight
+    return (1 - reg_weight) * inner_sum / float(norm_dist.shape[1] ** 2) + regularization * reg_weight
 
 
 def get_matrix(norm_dist, reg_weight=0.1):
@@ -212,7 +212,6 @@ def get_efficiencies(ref_dists, sample_dists, abundances, iteration=0, plot=Fals
 
 
 def get_residuals(ref_dists, sample_dists, abundances, iteration=None, plot=False):
-
     ef_mean, ef_all = get_efficiencies(ref_dists=ref_dists, sample_dists=sample_dists, abundances=abundances, plot=plot,
                                        iteration=iteration)
 
@@ -229,7 +228,6 @@ def get_residuals(ref_dists, sample_dists, abundances, iteration=None, plot=Fals
 
 def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=None, plot=False, reg_weight=0.1,
                          fp_cycles=3):
-
     """
     return non gc biased abundances
     :param sample_path: path to sample distribution file
@@ -285,7 +283,7 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
                                                                   sample_dists=sample_dist[:, ind],
                                                                   abundances=ab, plot=plot)
     res_range_new = res_range[ind]
-    
+
     ind_skip = np.where(res_range_new > threshold)[0]
     ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
     skipped_taxids.extend(taxids[ind_skip])
@@ -301,8 +299,9 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
         }
     )
     """
+    res_range = np.zeros(len(taxids))
     threshold = 10
-    final_threshold = threshold / np.power(2, fp_cycles)
+    final_threshold = threshold / np.power(2, fp_cycles-1)
     iteration = 1
     rep = 1
     ind_skip = []
@@ -340,7 +339,8 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
         skipped_taxids.extend(taxids[ind][ind_skip])
         taxon_removal_cycle[ind[ind_skip]] = iteration
 
-        print("Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
+        print(
+            "Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
         print(f"and with threshold {str(threshold)}")
 
         residual_df = pd.DataFrame(
@@ -349,6 +349,7 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
                 'res_range': res_range_new
             }
         )
+        residual_df.to_csv('residuals_cycle_' + str(iteration) + '.csv')
 
         if threshold == final_threshold and len(ind_skip) == 0:
             if plot:
@@ -371,7 +372,6 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
 
 
 def plot_dist2(dists, color=None, legend=False, line=False, **kwargs):
-
     if len(dists.shape) == 1:
         dists = dists.reshape((len(dists), 1))
 
@@ -520,7 +520,7 @@ def create_sample_dist_avg(fastq1, txids, kraken, fastq2, nbin=100, fasta=False)
 
         if int(current_txid) in txids:
             if (i - 1) % denom == 0 or i == 1:
-                gc = compute_gc(ln_fq1+ln_fq2, nbin=nbin)
+                gc = compute_gc(ln_fq1 + ln_fq2, nbin=nbin)
                 if gc > nbin:
                     i += 1
                     continue

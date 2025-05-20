@@ -247,7 +247,7 @@ def main():
     parser.add_argument('--plot', metavar='plot', type=bool, help='True if detailed plots should be generated',
                         default=False)
     parser.add_argument('--fp_cycles', metavar='fp_cycles', type=int,
-                        help='Number of iterations for false positive removal', default=4)
+                        help='Number of iterations for false positive removal', default=5)
     parser.add_argument('--reg_weight', metavar='reg_weight', type=float,
                         help='Determines how strong the regularization should be [between 0 and 1]', default=0.01)
     parser.add_argument('--fragment_len', metavar='fragment_len', type=int,
