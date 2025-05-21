@@ -188,8 +188,12 @@ def get_sample_dists(sdists, weights, map2lvl_taxids, lvl_taxids, gc_dists=None,
     return sample_dists
 
 
-def get_genome_length(kraken_db, nbin, lvl_taxids, map2lvl_taxids, est_reads_dct):
-    fname = os.path.join(kraken_db, 'gc_bin_' + str(nbin) + '_kmer_150_dist.csv')
+def get_genome_length(kraken_db, nbin, lvl_taxids, map2lvl_taxids, est_reads_dct, read_len, insert=None):
+    if insert is None:
+        fname = os.path.join(kraken_db, 'gc_bin_' + str(nbin) + '_kmer_' + str(read_len) + '_dist.csv')
+    else:
+        fname = os.path.join(kraken_db, 'gc_bin_' + str(nbin) + '_kmer_' + str(read_len) +
+                             '_insert_' + str(insert) + '_dist.csv')
     gc_dists = pd.read_csv(fname, index_col=0)
     g_seqids = gc_dists.drop('taxid', axis=1).groupby('seqids')
     seq_lengths = g_seqids.sum().sum(axis=1) * 50
@@ -411,6 +415,7 @@ def main():
             kraken_db, 'gc_bin_' + str(nbin) + '_kmer_' + str(read_len) +
                        '_insert_' + str(insert) + '_dist.csv'), index_col=0)
     else:
+        insert = None
         gc_dists = pd.read_csv(os.path.join(
             kraken_db, 'gc_bin_' + str(nbin) + '_kmer_' + str(read_len) +
                        '_dist.csv'), index_col=0)
@@ -574,7 +579,7 @@ def main():
 
     if length_correction:
         lengths = get_genome_length(kraken_db=kraken_db, nbin=nbin, lvl_taxids=lvl_taxids, est_reads_dct=est_reads_dct,
-                                    map2lvl_taxids=map2lvl_taxids)
+                                    map2lvl_taxids=map2lvl_taxids, insert=insert, read_len=read_len)
         refdists = refdists * lengths
 
     # sometimes no genome exists even though reads map there, this results in nans in GuaCAMOLE,

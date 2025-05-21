@@ -83,38 +83,43 @@ The Output is the same as the tab-delimited Bracken output file. Three additiona
 
 ### Demo
 
-To try out GuaCAMOLE you can download the fastq files of one of the replicates of the sample `GH` sequenced for a publication by Tourlouss et al. (2021) (for more details see their and our manuscripts). To download the data install `sra-tools` and run:
+To try out GuaCAMOLE you can download the fastq files of one of the replicates of the sample `A0` sequenced for a publication by Tourlousse et al. (2021) (for more details see their and our manuscripts). To download the data install `sra-tools` and run:
 
 ```bash
-fasterq-dump SRR12996167
+fasterq-dump SRR12996245
 ```
 
-You need to have a kraken2 database installed with the `--no-masking` flag set. Download the Kraken2 database using:
+You need to have a kraken2 database installed with the `--no-masking` flag set and classify the reads using Kraken2. You can do this yourself or use the pre-classified files in the demo data folder, then you can skip all the next steps and directly run guacamole. The `SRR12996245.kraken` file which contains the read classifications can be downloaded under the following link:
+
+`https://drive.google.com/file/d/1gxz7UFqoq-a25Gh0LsLTnDRjafTGvWSE/view?usp=sharing`
+
+SKIP THE NEXT 4 STEPS IF YOU'RE USING THE FILES PROVIDED IN THE `demo_data` FOLDER
+To download the Kraken2 database use:
 
 ```bash
-kraken2-build --standard --db demo --threads 24 --no-masking
+kraken2-build --standard --db demo_db --threads 24 --no-masking
 ```
 
 Now you can classify the reads using
 
 ```bash
-kraken2 --db standard --threads 24 --report SRR12996167_report.txt --paired SRR12996167_1.fastq SRR12996167_2.fastq > SRR12996167.kraken
+kraken2 --db demo_db --threads 24 --report SRR12996245_report.txt --paired SRR12996245_1.fastq SRR12996245_2.fastq > SRR12996245.kraken
 ```
 
 Then build a Bracken database for the read length of the sequencing data which is 150 bp:
 
 ```bash
-bracken-build -d standard -t 24 -l 150 
+bracken-build -d demo_db -t 24 -l 150 
 ```
 
 Now build a GuaCAMOLE database for the corresponding read and fragment length (should take around an hour):
 
 ```bash
-create-reference-dist --lib_path standard --read_len 150 --ncores 20 --fragment_len 300
+create-reference-dist --lib_path demo_db --read_len 150 --ncores 20 --fragment_len 400
 ```
 
-Now run GuaCAMOLE using (should take around 20 minutes):
+Now run GuaCAMOLE using (should take around 10 minutes):
 
 ```bash
-guacamole --kraken_report SRR12996167_report.txt --kraken_file SRR12996167.kraken --kraken_db standard --read_len 150 fragment_len 150 --length_correction True --output SRR12996167_guacamole.out --read_files SRR12996167_1.fastq SRR12996167_2.fastq
+guacamole --kraken_report SRR12996245_report.txt --kraken_file SRR12996245.kraken --read_len 150 --output SRR12996245.guac --fragment_len 400 --length_correction True --kraken_db demo_db/ --threshold 500 --plot True --read_files SRR12996245_1.fastq SRR12996245_2.fastq
 ```
