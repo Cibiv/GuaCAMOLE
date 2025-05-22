@@ -693,7 +693,7 @@ def main():
     o_file = open(output, 'w')
     o_file.write('name\t' + 'taxonomy_id\t' + 'taxonomy_lvl\t' + 'kraken_assigned_reads\t' + 'added_reads\t' +
                  'new_est_reads\t' + 'fraction_total_reads\t' + 'Bracken_estimate\t' + 'GuaCAMOLE_estimate\t' +
-                 'GuaCAMOLE_est_eff\t' + 'GC content\n' + 'Taxon Removal Cycle\n')
+                 'GuaCAMOLE_est_eff\t' + 'GC content\t' + 'Taxon Removal Cycle\n')
 
     for taxid in lvl_taxids:
         [name, all_reads, lvl_reads, added_reads] = lvl_taxids[taxid]
