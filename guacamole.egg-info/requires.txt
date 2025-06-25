@@ -1,7 +1,0 @@
-biopython
-matplotlib
-numpy
-pandas
-qpsolvers
-scipy
-seaborn

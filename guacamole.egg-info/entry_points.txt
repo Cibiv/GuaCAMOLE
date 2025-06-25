@@ -1,4 +1,0 @@
-[console_scripts]
-create-reference-dist = guacamole.create_reference_dist:main
-guacamole = guacamole.guacamole:main
-
