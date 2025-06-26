@@ -31,29 +31,65 @@ To install the quadratic programming solver:
 pip install qpsolvers['cvxopt']
 ```
 
-## Usage
+## Testing
 
-### 1. Create Reference Distribution
+The `demo_data` folder contains a Kraken2 database containing the 19 bacterial species found in the mock community of Tourlousse *et al.* [[1]](#references), already prepared to be used by Bracken and GuaCAMOLE. The folder also contains a 1% subsample of metagenomic sequencing library [SRR12996245](https://www.ncbi.nlm.nih.gov/sra/?term=SRR12996245) representing that mock community, and the Kraken2 output for that subsample. To run GuaCAMOLE on this data, run
 
-GuaCAMOLE relies on the library.fna files downloaded by Kraken2 to generate the reference distributions. The Kraken2 database needs to be downloaded with the ```--no-masking``` option with the ```kraken2-build``` command!
-
-To create a GC reference distribution from a Kraken2 database run the following command with the parameters of your sample:
-
-```bash
-
-create-reference-dist --lib_path path/to/kraken_db --read_len 150 --fragment_len 400 --ncores 20
+```
+./SRR12996245.1pct.sh
 ```
 
-Specifying the ```fragment_len``` parameters for paired-end sequencing samples can help with the accuracy of GuaCAMOLE, especially if the fragments are a lot longer than the reads. If specified, GuaCAMOLE will use the mean GC content of the read pair as an approximation to the GC content of the fragment. If not specified just single reads.
+in that folder. The `SRR12996245.1pct.sh` unzips the FASTQ files and Kraken2 results, changes into to the subdirectory `out/`, and runs GuaCAMOLE with
 
-For GuaCAMOLE to run it also requires a Bracken database with the correct read length to exist in the Kraken database folder.
+```
+guacamole \
+	--output SRR12996245.1pct.guaca \
+	--kraken_report ../SRR12996245.1pct_report.txt \
+	--kraken_file ../SRR12996245.1pct.kraken \
+	--read_files ../SRR12996245.1pct_1.fastq ../SRR12996245.1pct_2.fastq \
+	--kraken_db ../demo_db \
+	--read_len 150 \
+	--fragment_len 400 \
+	--length_correction True \
+	--threshold 5 \
+	--plot True
+```
 
-### 2. Run GuaCAMOLE for Species Abundance Estimation
+## Usage
 
-To estimate species abundances from your data, run:
+### 1. Building a Kraken2 database
+
+To build a standard Kraken2 database compatible with GuaCAMOLE, run
 
 ```bash
-guacamole --kraken_report path/to/report --kraken_file path/to/kraken --kraken_db path/to/kraken_db --read_len 150 --output result.txt --read_files path/to/reads_1.fastq path/to/reads_2.fastq
+kraken2-build --fast-build --standard --db path/to/kraken_db \
+              --threads number_of_cpus_to_use --no-masking
+```
+
+Existing Kraken2 databases can be used, provided that they have been built with the ```--no-masking``` option. Masked databases cannot be used with GuaCAMOLE.
+
+### 2. Create Reference Distribution
+
+GuaCAMOLE requires a Bracken database and a reference distribution, both of which must be created for a read length matching that of the data. By also specifying the ```--fragment_len``` parameter when building the reference distribution, the GC content is computed on a per-fragment instead of a per-read level. This can help with the accuracy of GuaCAMOLE, especially if the fragments are a lot longer than the reads. These databases must be built once for every read length (and fragment length if specified).
+
+```bash
+bracken-build -d path/to/kraken_db -t number_of_cpus_to_use -l read_length_of_data 
+create-reference-dist --lib_path path/to/kraken_db --ncores number_of_cpus_to_use \
+                      --read_len read_length_of_data --fragment_len fragment_length_of_data
+```
+
+### 3. Run GuaCAMOLE for Species Abundance Estimation
+
+To estimate species abundances from your data, the reads are first be assigned to taxa with Kraken2, and the Kraken2 output is then processed with GuaCAMOLE. GuaCAMOLE includes Bracken, so no separated invocation of Bracken is necessary.
+
+```bash
+kraken2 --db path/to/kraken_db --threads number_of_cpus_to_use --report path/to/kraken_report \
+        --paired path/to/reads_1.fastq path/to/reads_2.fastq \
+        > path/to/kraken_file
+guacamole --kraken_report path/to/kraken_report --kraken_file path/to/kraken_file --kraken_db path/to/kraken_db \
+          --read_files path/to/reads_1.fastq path/to/reads_2.fastq
+          --read_len read_length_of_data --fragment_len fragment_length_of_data \
+          --output result.txt 
 ```
 
 ### Command-line Options
@@ -81,45 +117,6 @@ The Output is the same as the tab-delimited Bracken output file. Three additiona
 - `GuaCMAOLE_est_eff`, the abundances computed using the estimated efficiencies by GuaCAMOLE (this does also include esimates for the taxa that were labelled as false positives by GuaCAMOLE)
 - `GC_content`, the GC content of the taxon's genome
 
-### Demo
+## References
 
-To try out GuaCAMOLE you can download the fastq files of one of the replicates of the sample `A0` sequenced for a publication by Tourlousse et al. (2021) (for more details see their and our manuscripts). To download the data install `sra-tools` and run:
-
-```bash
-fasterq-dump SRR12996245
-```
-
-You need to have a kraken2 database installed with the `--no-masking` flag set and classify the reads using Kraken2. You can do this yourself or use the pre-classified files in the demo data folder, then you can skip all the next steps and directly run guacamole. The `SRR12996245.kraken` file which contains the read classifications can be downloaded under the following link:
-
-`https://drive.google.com/file/d/1gxz7UFqoq-a25Gh0LsLTnDRjafTGvWSE/view?usp=sharing`
-
-SKIP THE NEXT 4 STEPS IF YOU'RE USING THE FILES PROVIDED IN THE `demo_data` FOLDER
-To download the Kraken2 database use:
-
-```bash
-kraken2-build --standard --db demo_db --threads 24 --no-masking
-```
-
-Now you can classify the reads using
-
-```bash
-kraken2 --db demo_db --threads 24 --report SRR12996245_report.txt --paired SRR12996245_1.fastq SRR12996245_2.fastq > SRR12996245.kraken
-```
-
-Then build a Bracken database for the read length of the sequencing data which is 150 bp:
-
-```bash
-bracken-build -d demo_db -t 24 -l 150 
-```
-
-Now build a GuaCAMOLE database for the corresponding read and fragment length (should take around an hour):
-
-```bash
-create-reference-dist --lib_path demo_db --read_len 150 --ncores 20 --fragment_len 400
-```
-
-Now run GuaCAMOLE using (should take around 10 minutes):
-
-```bash
-guacamole --kraken_report SRR12996245_report.txt --kraken_file SRR12996245.kraken --read_len 150 --output SRR12996245.guac --fragment_len 400 --length_correction True --kraken_db demo_db/ --threshold 500 --plot True --read_files SRR12996245_1.fastq SRR12996245_2.fastq
-```
+[1] Tourlousse, D.M., Narita, K., Miura, T. et al, 2021. Validation and standardization of DNA extraction and library construction methods for metagenomics-based human fecal microbiome measurements. *Microbiome* **9**, 95. [https://doi.org/10.1186/s40168-021-01048-3](DOI)
