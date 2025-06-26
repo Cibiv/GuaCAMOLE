@@ -101,9 +101,12 @@ def main():
     os.chdir(lib_path)
     seqid2taxid = pd.read_csv('seqid2taxid.map', sep='\t', header=None)
     fasta_paths = glob('library/*/*.fna')
+    # SeqIO.index_db seems to be sensitive to file order, so make sure it is reproducible
+    fasta_paths.sort()
     print('Indexing fasta files...')
     record_dict = SeqIO.index_db('fasta_index.sql', fasta_paths, 'fasta')
 
+    print("Indexing complete, querying sequence IDs")
     seqids = [x for x in np.array(seqid2taxid[0]) if x in record_dict.keys()]
 
     if old_gc_dist is not None:
