@@ -678,6 +678,7 @@ def main():
     excessive_removal_detected = False
     if removed_fraction_bracken > 0.50:
         excessive_removal_detected = True
+        efficiencies.fill(np.nan)
         warning_message = (
             f"WARNING: GuaCAMOLE assigned zero abundance to taxa representing "
             f"{removed_fraction_bracken * 100:.2f}% of the Bracken-estimated abundance. "
@@ -685,9 +686,10 @@ def main():
             "GuaCAMOLE abundance and efficiency estimates may be unreliable and are reported as NaN."
         )
         print(warning_message, file=sys.stderr)  # Print to standard error
-    else:
-        efficiencies = efficiencies / np.max(efficiencies)
-        np.savetxt('efficiencies.txt', efficiencies)
+
+    # write efficiencies.txt
+    efficiencies = efficiencies / np.max(efficiencies)
+    np.savetxt('efficiencies.txt', efficiencies)
 
     ## write output
     o_file = open(output, 'w')
