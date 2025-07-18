@@ -55,7 +55,7 @@ guacamole \
 	--plot True
 ```
 
-## Docker
+### Docker
 
 GuaCAMOLE is also available as docker image under `laurenz0908/guacamole`. To use the docker image for testing GuaCAMOLE do:
 
