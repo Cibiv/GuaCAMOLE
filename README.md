@@ -55,6 +55,41 @@ guacamole \
 	--plot True
 ```
 
+## Docker
+
+GuaCAMOLE is also available as docker image under `laurenz0908/guacamole`. To use the docker image for testing GuaCAMOLE do:
+
+```
+mkdir guacamole_out
+```
+
+for creating the output folder. Then run the docker image interactively by running
+
+```
+docker run -it \
+  -v "$(pwd)/guacamole_output:/app/demo_data/out" \
+  -w "/app/demo_data/out" \
+  laurenz0908/guacamole:latest
+```
+
+Then from the docker image shell, run
+
+```
+guacamole \
+        --output SRR12996245.1pct.guaca \
+        --kraken_report ../SRR12996245.1pct_report.txt \
+        --kraken_file ../SRR12996245.1pct.kraken \
+        --read_files ../SRR12996245.1pct_1.fastq ../SRR12996245.1pct_2.fastq \
+        --kraken_db ../demo_db \
+        --read_len 150 \
+        --fragment_len 400 \
+        --length_correction True \
+        --threshold 5 \
+        --plot True
+```
+
+You can exit the image via `exit`. The output files of GuaCAMOLE should now be in the `guacamole_output` directory.
+
 ## Usage
 
 ### 1. Building a Kraken2 database
