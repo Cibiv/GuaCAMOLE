@@ -57,7 +57,7 @@ guacamole \
 
 ### Docker
 
-GuaCAMOLE is also available as docker image under `laurenz0908/guacamole`. To use the docker image for testing GuaCAMOLE do:
+GuaCAMOLE is also available as docker image under `laurenz0908/guacamole:latest`. To use the docker image for testing GuaCAMOLE do:
 
 ```
 mkdir guacamole_out
