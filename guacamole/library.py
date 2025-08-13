@@ -239,24 +239,8 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
 
     skipped_taxids = []
     taxids = np.array(taxids)
-    ind = np.arange(0, len(taxids))
     cov_rel = np.zeros(norm_dist.shape)
     taxon_removal_cycle = np.repeat(np.nan, len(taxids))
-
-    ### skip ones with very high range (and zero reads...)
-    ind_zero_reads = np.where(np.sum(norm_dist[:, ind], axis=0) == 0)[0]
-    skipped_taxids.extend(taxids[ind][ind_zero_reads])
-    taxon_removal_cycle[ind[ind_zero_reads]] = 0
-    ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
-    norm = norm_dist[:, ind] / norm_dist[:, ind].sum(0)
-    avg_range = (np.max(norm, axis=0) - np.min(norm, axis=0)) / (norm != 0).sum(0)
-    ind_skip_range = np.where(avg_range > 0.01)[0]
-    skipped_taxids.extend(taxids[ind][ind_skip_range])
-    taxon_removal_cycle[ind[ind_skip_range]] = 0
-
-    if len(skipped_taxids) != 0:
-        print("Removing taxa " + str(skipped_taxids) + " because out of high observed vs. expected read ranges")
-
     res_range = np.zeros(len(taxids))
     threshold = 10
     final_threshold = threshold / np.power(2, fp_cycles-1)
