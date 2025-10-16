@@ -4,7 +4,7 @@
 **GC-aware species abundance estimation from metagenomic data**
 
 ## Overview
-GuaCAMOLE is a tool for estimating species abundance from metagenomic data, considering GC content. This package implements various scripts to generate reference distributions, correct for GC bias, and estimate species abundances.
+GuaCAMOLE estimates and corrects for the GC bias inherent in most metagenomic sequencing libraries. GuaCAMOLE is based on [Bracken](https://ccb.jhu.edu/software/bracken/) and relies on [Kraken2](https://ccb.jhu.edu/software/kraken2/) for read classification; see our [publication](https://www.biorxiv.org/content/10.1101/2024.09.20.614100) for an in-depth description and evaluation of the algorithm. For instructions how to run GuaCAMOLE on your own dataset see below.
 
 ## Features
 - Create GC reference distributions from Kraken2 databases.
