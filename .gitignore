@@ -1,2 +1,4 @@
 build/
 guacamole.egg-info/
+dist/
+guacamole_bio.egg-info/

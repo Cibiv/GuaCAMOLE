@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guacamole-bio"
+version = "1.0"
+authors = [
+  { name = "Laurenz Holcik", email = "laurenz.holcik@gmail.com" },
+]
+description = "GC-aware species abundance estimation from metagenomic data."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "seaborn",
+    "biopython",
+    "scipy",
+    "qpsolvers",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/cibiv/guacamole"
+"Bug Tracker" = "https://github.com/cibiv/guacamole/issues"
+
+[project.scripts]
+create-reference-dist = "guacamole.create_reference_dist:main"
+guacamole = "guacamole.guacamole:main"
