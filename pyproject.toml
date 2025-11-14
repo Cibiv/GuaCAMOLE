@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "guacamole"
+name = "guacamole-bio"
 version = "1.0"
 authors = [
   { name = "Laurenz Holcik", email = "laurenz.holcik@gmail.com" },
