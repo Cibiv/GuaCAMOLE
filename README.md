@@ -4,7 +4,7 @@
 **GC-aware species abundance estimation from metagenomic data**
 
 ## Overview
-GuaCAMOLE estimates and corrects for the GC bias inherent in most metagenomic sequencing libraries. GuaCAMOLE is based on [Bracken](https://ccb.jhu.edu/software/bracken/) and relies on [Kraken2](https://ccb.jhu.edu/software/kraken2/) for read classification; see our [publication](https://www.biorxiv.org/content/10.1101/2024.09.20.614100) for an in-depth description and evaluation of the algorithm. For instructions how to run GuaCAMOLE on your own dataset see below.
+GuaCAMOLE estimates and corrects for the GC bias inherent in most metagenomic sequencing libraries. GuaCAMOLE is based on [Bracken](https://ccb.jhu.edu/software/bracken/) and relies on [Kraken2](https://ccb.jhu.edu/software/kraken2/) for read classification; see our [publication](https://doi.org/10.1038/s41467-025-65530-4) in *Nature Communications* [[2]](#references) for an in-depth description and evaluation of the algorithm. For instructions how to run GuaCAMOLE on your own dataset see below.
 
 ## Features
 - Create GC reference distributions from Kraken2 databases.
@@ -33,7 +33,7 @@ pip install qpsolvers['cvxopt']
 
 ## Testing
 
-The `demo_data` folder contains a Kraken2 database containing the 19 bacterial species found in the mock community of Tourlousse *et al.* [[1]](#references), already prepared to be used by Bracken and GuaCAMOLE. The folder also contains a 1% subsample of metagenomic sequencing library [SRR12996245](https://www.ncbi.nlm.nih.gov/sra/?term=SRR12996245) representing that mock community, and the Kraken2 output for that subsample. To run GuaCAMOLE on this data, run
+The `demo_data` folder contains a Kraken2 database containing the 19 bacterial species found in the mock community of Tourlousse *et al.* [[2]](#references), already prepared to be used by Bracken and GuaCAMOLE. The folder also contains a 1% subsample of metagenomic sequencing library [SRR12996245](https://www.ncbi.nlm.nih.gov/sra/?term=SRR12996245) representing that mock community, and the Kraken2 output for that subsample. To run GuaCAMOLE on this data, run
 
 ```
 ./SRR12996245.1pct.sh
@@ -154,4 +154,6 @@ The Output is the same as the tab-delimited Bracken output file. Three additiona
 
 ## References
 
-[1] Tourlousse, D.M., Narita, K., Miura, T. et al, 2021. Validation and standardization of DNA extraction and library construction methods for metagenomics-based human fecal microbiome measurements. *Microbiome* **9**, 95. [https://doi.org/10.1186/s40168-021-01048-3](DOI)
+[1] Holcik, L., von Haeseler, A. and Pflug, F.G., 2025. Genomic GC bias correction improves species abundance estimation from metagenomic data. *Nature Communications* **16**, 10523. [https://doi.org/10.1038/s41467-025-65530-4]
+
+[2] Tourlousse, D.M., Narita, K., Miura, T. et al, 2021. Validation and standardization of DNA extraction and library construction methods for metagenomics-based human fecal microbiome measurements. *Microbiome* **9**, 95. [https://doi.org/10.1186/s40168-021-01048-3](DOI)
