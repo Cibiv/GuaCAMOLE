@@ -285,14 +285,6 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
             "Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
         print(f"and with threshold {str(threshold)}")
 
-        residual_df = pd.DataFrame(
-            {
-                'taxid': taxids[ind],
-                'res_range': res_range_new
-            }
-        )
-        residual_df.to_csv('residuals_cycle_' + str(iteration) + '.csv')
-
         if threshold == final_threshold and len(ind_skip) == 0:
             if plot:
                 residual_plot(res_array=cov_rel[:, ind], taxids=taxids[ind], threshold_plot=None)
