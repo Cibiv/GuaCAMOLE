@@ -92,6 +92,15 @@ You can exit the image via `exit`. The output files of GuaCAMOLE should now be i
 
 ## Usage
 
+### 0. Downloading pre-built Kraken2 and Bracken DBs
+
+We provide a pre-built standard Kraken2 database with Bracken database files included that can be used for GuaCAMOLE. If you download this you can skip steps 1 and 2. The database contains files for read lengths of 50, 75, 100, 125, 150, 200, 250 and 300 bp.
+Download the archive via:
+
+```
+https://drive.google.com/file/d/122wIP8VqJr3i8EXmFuBpxq6_wobrszy8/view?usp=sharing
+```
+
 ### 1. Building a Kraken2 database
 
 To build a standard Kraken2 database compatible with GuaCAMOLE, run
