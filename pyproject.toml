@@ -18,9 +18,9 @@ authors = [
 description = "GC-aware species abundance estimation from metagenomic data."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "COPYING" }
+license = "GPL-3.0-only"
+license-files = "COPYING"
 classifiers = [
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Operating System :: OS Independent",
