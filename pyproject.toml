@@ -11,7 +11,7 @@ include = ["guacamole",]
 
 [project]
 name = "guacamole-bio"
-version = "1.0.1"
+version = "1.0.2"
 authors = [
   { name = "Laurenz Holcik", email = "laurenz.holcik@gmail.com" },
 ]
@@ -19,7 +19,7 @@ description = "GC-aware species abundance estimation from metagenomic data."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-only"
-license-files = "COPYING"
+license-files = [ "COPYING" ]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
