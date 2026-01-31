@@ -38,7 +38,6 @@ def demo_env():
         else:
             pytest.fail(f"Required source file missing: {source_bz2}")
 
-    # Yield paths so the test function knows where things are
     yield {'out': out_dir, 'demo': demo_dir}
 
 def test_guacamole_metrics(demo_env):
@@ -49,7 +48,6 @@ def test_guacamole_metrics(demo_env):
     demo_dir = demo_env['demo']
     output_file_name = "SRR12996245.1pct.guaca"
 
-    # Construct command
     cmd = [
         sys.executable, "-m", "guacamole.guacamole",
         "--output", output_file_name,
@@ -64,7 +62,6 @@ def test_guacamole_metrics(demo_env):
         "--plot", "False"
     ]
 
-    # Run Guacamole
     result = subprocess.run(
         cmd, cwd=out_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
@@ -72,7 +69,7 @@ def test_guacamole_metrics(demo_env):
     # Assert successful run
     assert result.returncode == 0, f"Command failed with stderr: {result.stderr}"
 
-    # 1. Check Efficiencies (50% - 70%)
+    # Check Efficiencies
     eff_path = os.path.join(out_dir, "efficiencies.txt")
     assert os.path.exists(eff_path), "efficiencies.txt was not created"
     
@@ -81,14 +78,13 @@ def test_guacamole_metrics(demo_env):
     
     assert 20 <= max_eff <= 30, f"Max efficiency {max_eff:.2f} is out of range [20, 30]"
 
-    # 2. Check Abundances (4% - 12%)
+    # Check Abundances
     guaca_path = os.path.join(out_dir, output_file_name)
     assert os.path.exists(guaca_path), f"{output_file_name} was not created"
 
     df = pd.read_csv(guaca_path, sep="\t")
     abundances = df['GuaCAMOLE_estimate']
 
-    # Vectorized check (faster and cleaner than a loop)
     assert (np.sum(abundances) == pytest.approx(1.0, abs=0.01)), f"Sum of abundances is not 1: {np.sum(abundances)}"
     assert (abundances >= 0.03).all(), f"Some abundances are < 4%:\n{df[abundances < 0.04]}"
     assert (abundances <= 0.12).all(), f"Some abundances are > 12%:\n{df[abundances > 0.12]}"
