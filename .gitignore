@@ -2,3 +2,5 @@ build/
 guacamole.egg-info/
 dist/
 guacamole_bio.egg-info/
+__pycache__/
+tests/test_out_pytest/
