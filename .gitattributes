@@ -1,3 +1,5 @@
 *.fna filter=lfs diff=lfs merge=lfs -text
 *.k2d filter=lfs diff=lfs merge=lfs -text
 *.bz2 filter=lfs diff=lfs merge=lfs -text
+# SCM syntax highlighting & preventing 3-way merges
+pixi.lock merge=binary linguist-language=YAML linguist-generated=true -diff

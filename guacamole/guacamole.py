@@ -1,6 +1,8 @@
 # %%
-import os, sys, argparse
-from time import gmtime, localtime
+import os
+import sys
+import argparse
+from time import localtime
 from time import strftime
 from datetime import datetime
 import pandas as pd
@@ -8,13 +10,8 @@ import numpy as np
 import Bio.SeqIO as SeqIO
 import guacamole.library as lib
 import matplotlib.pyplot as plt
-import seaborn as sns
 from math import floor
 from numpy.random import uniform
-from shutil import copyfile
-import subprocess
-import contextlib
-import argparse
 
 
 np.seterr(divide='ignore', invalid='ignore')
@@ -293,10 +290,6 @@ def main():
     time_start = strftime("%m-%d-%Y %H:%M:%S", localtime())
     sys.stdout.write("PROGRAM START TIME: " + time_start + '\n')
 
-    lvl_dict = {'D': 'domains', 'P': 'phylums', 'O': 'orders', 'C': 'classes', 'F': 'families', 'G': 'genuses',
-                'S': 'species'}
-    if level in lvl_dict:
-        abundance_lvl = lvl_dict[level]
     branch = 0
     if len(level) > 1:
         branch = int(level[1:])
@@ -312,7 +305,6 @@ def main():
     n_lvl_total = 0
     n_lvl_est = 0
     n_lvl_del = 0
-    lvl_nodes = []
     leaf_nodes = []
 
     all_nodes = {}
@@ -334,10 +326,6 @@ def main():
         [name, taxid, level_num, level_id, all_reads, level_reads] = report_vals
         total_reads += level_reads
         # Skip unclassified
-        if level_id == 'U':
-            unclassified_line = line
-            u_reads = level_reads
-            continue
         # Tree Root
         if taxid == '1':
             root_node = Tree(name, taxid, level_num, 'R', all_reads, level_reads)

@@ -4,3 +4,10 @@ dist/
 guacamole_bio.egg-info/
 __pycache__/
 tests/test_out_pytest/
+.ruffcache
+# pixi environments
+.pixi/*
+pixi.lock
+pixi.toml
+.venv/
+uv.lock
