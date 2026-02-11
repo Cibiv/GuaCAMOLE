@@ -326,6 +326,8 @@ def main():
         [name, taxid, level_num, level_id, all_reads, level_reads] = report_vals
         total_reads += level_reads
         # Skip unclassified
+        if level_id == 'U':
+            continue
         # Tree Root
         if taxid == '1':
             root_node = Tree(name, taxid, level_num, 'R', all_reads, level_reads)
