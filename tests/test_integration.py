@@ -57,9 +57,9 @@ def test_guacamole_metrics(demo_env):
         "--kraken_db", os.path.join(demo_dir, "demo_db"),
         "--read_len", "150",
         "--fragment_len", "400",
-        "--length_correction", "True",
+        "--length_correction",
         "--threshold", "5",
-        "--plot", "False"
+        "--plot"
     ]
 
     result = subprocess.run(

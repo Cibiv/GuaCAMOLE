@@ -50,9 +50,9 @@ guacamole \
 	--kraken_db ../demo_db \
 	--read_len 150 \
 	--fragment_len 400 \
-	--length_correction True \
+	--length_correction \
 	--threshold 5 \
-	--plot True
+	--plot
 ```
 
 ### Docker
@@ -83,9 +83,9 @@ guacamole \
         --kraken_db ../demo_db \
         --read_len 150 \
         --fragment_len 400 \
-        --length_correction True \
+        --length_correction \
         --threshold 5 \
-        --plot True
+        --plot
 ```
 
 You can exit the image via `exit`. The output files of GuaCAMOLE should now be in the `guacamole_output` directory.
@@ -131,7 +131,7 @@ kraken2 --db path/to/kraken_db --threads number_of_cpus_to_use --report path/to/
         --paired path/to/reads_1.fastq path/to/reads_2.fastq \
         > path/to/kraken_file
 guacamole --kraken_report path/to/kraken_report --kraken_file path/to/kraken_file --kraken_db path/to/kraken_db \
-          --read_files path/to/reads_1.fastq path/to/reads_2.fastq
+          --read_files path/to/reads_1.fastq path/to/reads_2.fastq \
           --read_len read_length_of_data --fragment_len fragment_length_of_data \
           --output result.txt 
 ```
@@ -145,24 +145,24 @@ guacamole --kraken_report path/to/kraken_report --kraken_file path/to/kraken_fil
 - `--output`: Output file name (required)
 - `--read_files`: Path to input read files (required)
 - `--threshold`: Minimum number of reads found for a species to estimate its abundance, default=500
-- `--length_correction`, genome size correction (taxonomic vs. read abundance), default=False
-- `--plot`, True if detailed plots should be generated
-- `--fp_cycles`, Number of iterations for false positive removal, default=4
-- `--reg_weight`, Determines how strong the regularization should be [between 0 and 1]', default=0.01
-- `--fragment_len`, length of the fragment if paired end and known', default=None
-- `--fasta`, True if reads are in fasta format, false if fastq', default=False
+- `--length_correction`: Enable genome size correction (taxonomic vs. read abundance)
+- `--plot`: Generate detailed plots
+- `--fp_cycles`: Number of iterations for false positive removal, default=4
+- `--reg_weight`: Determines how strong the regularization should be [between 0 and 1], default=0.01
+- `--fragment_len`: Length of the fragment if paired end and known, default=None
+- `--fasta`: Enable if reads are in fasta format (default is fastq)
 
 ### Output
 
 The Output is the same as the tab-delimited Bracken output file. Three additional columns are added:
 
-- `Bracken_estimate`, the abundance estimate from Bracken (if `length_correction=True` they are genome length corrected the same as the GuaCAMOLE estimates)
+- `Bracken_estimate`, the abundance estimate from Bracken (if `--length_correction` is set they are genome length corrected the same as the GuaCAMOLE estimates)
 - `GuaCAMOLE_estimate`, the abundances estimated using the abundance parameter from the GuaCAMOLE algorithm
 - `GuaCMAOLE_est_eff`, the abundances computed using the estimated efficiencies by GuaCAMOLE (this does also include esimates for the taxa that were labelled as false positives by GuaCAMOLE)
 - `GC_content`, the GC content of the taxon's genome
 
 ## References
 
-[1] Holcik, L., von Haeseler, A. and Pflug, F.G., 2025. Genomic GC bias correction improves species abundance estimation from metagenomic data. *Nature Communications* **16**, 10523. [https://doi.org/10.1038/s41467-025-65530-4]
+[1] Holcik, L., von Haeseler, A. and Pflug, F.G., 2025. Genomic GC bias correction improves species abundance estimation from metagenomic data. *Nature Communications* **16**, 10523. [https://doi.org/10.1038/s41467-025-65530-4]
 
 [2] Tourlousse, D.M., Narita, K., Miura, T. et al, 2021. Validation and standardization of DNA extraction and library construction methods for metagenomics-based human fecal microbiome measurements. *Microbiome* **9**, 95. [https://doi.org/10.1186/s40168-021-01048-3](DOI)

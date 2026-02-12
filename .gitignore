@@ -11,3 +11,4 @@ pixi.lock
 pixi.toml
 .venv/
 uv.lock
+.pytest_cache
