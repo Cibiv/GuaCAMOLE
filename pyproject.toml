@@ -11,7 +11,7 @@ include = ["guacamole",]
 
 [project]
 name = "guacamole-bio"
-version = "1.0.2"
+version = "1.0.4"
 authors = [
   { name = "Laurenz Holcik", email = "laurenz.holcik@gmail.com" },
 ]
