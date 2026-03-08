@@ -53,6 +53,9 @@ def parse_args():
     parser.add_argument('--quantiles', metavar='quantiles', type=float,
                         help='min and max quantiles for GC distributions',
                         nargs=2, default=[0.025, 0.975])
+    parser.add_argument('--verbose', action='store_true',
+                        help='Write per-iteration metrics (abundances, efficiencies, residuals) to output files '
+                             'for diagnostic visualization')
 
     return parser.parse_args()
 
@@ -74,6 +77,7 @@ def main():
     fragment_len = args.fragment_len
     fasta = args.fasta
     quantiles = args.quantiles
+    verbose = args.verbose
 
     if len(args.read_files) == 2:
         fastq1 = args.read_files[0]
@@ -211,7 +215,8 @@ def main():
         'ref_bin_' + str(nbin) + '_input.dist',
         fp_cycles=fp_cycles,
         taxids=cols_sorted, plot=plot,
-        reg_weight=reg_weight
+        reg_weight=reg_weight,
+        verbose=verbose
     )
 
     ab[np.isinf(ab)] = np.nan

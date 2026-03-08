@@ -227,7 +227,7 @@ def get_residuals(ref_dists, sample_dists, abundances, iteration=None, plot=Fals
 
 
 def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=None, plot=False, reg_weight=0.1,
-                         fp_cycles=3):
+                         fp_cycles=3, verbose=False):
     """
     return non gc biased abundances
     :param sample_path: path to sample distribution file
@@ -278,6 +278,23 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
 
         res_range[ind] = res_range_new
         ind_skip = np.where(res_range_new > threshold)[0]
+
+        if verbose:
+            import json
+            iteration_data = {
+                'iteration': iteration,
+                'rep': rep,
+                'threshold': threshold,
+                'taxids': taxids[ind].tolist(),
+                'abundances': ab.tolist(),
+                'efficiencies': (efficiencies / np.max(efficiencies)).tolist(),
+                'residuals': cov_rel[:, ind].tolist(),  # shape: (n_gc_bins, n_taxa)
+                'res_range': res_range_new.tolist(),
+                'removed_taxids': taxids[ind][ind_skip].tolist() if len(ind_skip) > 0 else [],
+            }
+            with open(f'iteration_{iteration}_rep_{rep}.json', 'w') as f:
+                json.dump(iteration_data, f)
+
         skipped_taxids.extend(taxids[ind][ind_skip])
         taxon_removal_cycle[ind[ind_skip]] = iteration
 
@@ -298,6 +315,15 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
             iteration += 1
             threshold = threshold / 2
             rep = 1
+
+    if verbose:
+        manifest = {
+            'total_iterations': iteration,
+            'final_threshold': final_threshold,
+            'all_skipped_taxids': [int(t) for t in skipped_taxids],
+        }
+        with open('iteration_manifest.json', 'w') as f:
+            json.dump(manifest, f)
 
     all_ab = np.zeros(len(taxids))
     all_ab[np.where(np.isin(taxids, skipped_taxids, invert=True))[0]] = ab
