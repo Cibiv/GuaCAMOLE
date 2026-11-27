@@ -1,13 +1,15 @@
 import gzip
 import time
 
-import guacamole.library as lib
 import numpy as np
 import pandas as pd
 import pytest
+
+import guacamole.library as lib
 from guacamole.create_reference_dist import parsing
 from guacamole.distributions import get_sample_dists
 from guacamole.io import write_output
+from guacamole.plotting import save_diagnostic_plots
 
 
 def _bruteforce_objective(norm_dist, sample_dist, x, reg_weight):
@@ -287,3 +289,42 @@ def test_get_matrix_performance_large_community():
 
     assert p_mat.shape == (n_taxa, n_taxa)
     assert elapsed < 0.2, f"get_matrix took {elapsed:.3f}s for {n_taxa} taxa (expected < 0.2s)"
+
+
+def test_save_diagnostic_plots_summary_and_iterations(tmp_path):
+    """save_diagnostic_plots must write a clean single PDF (and multi-page with include_iterations)."""
+    gc = np.arange(101)
+    true_eff = np.clip(1.0 - 8.0 * (gc / 100.0 - 0.5) ** 2, 0.2, 1.0)
+    f_mat = np.column_stack([np.exp(-0.5 * ((gc - c) / 6.0) ** 2) for c in (35, 50, 65)])
+    f_mat /= f_mat.sum(axis=0, keepdims=True)
+    fp_ref = np.exp(-0.5 * ((gc - 45) / 6.0) ** 2)
+    fp_ref /= fp_ref.sum()
+    fp_obs = np.exp(-0.5 * ((gc - 58) / 6.0) ** 2)
+    fp_obs /= fp_obs.sum()
+
+    ref_all = np.column_stack([f_mat, fp_ref])
+    obs_all = np.column_stack([50_000.0 * f_mat * true_eff[:, None], 3_000.0 * fp_obs])
+    taxids = np.array([1, 2, 3, 999])
+
+    ab, cycles, eff, diag = lib.corrected_abundances(
+        obs_all, ref_all, quantiles=[0.05, 0.95], taxids=taxids,
+        reg_weight=0.01, fp_cycles=5, return_diagnostics=True,
+    )
+    br_ab = obs_all.sum(axis=0) / obs_all.sum()
+    ab_df = pd.DataFrame({
+        'abundance_ls': ab,
+        'abundance_br': br_ab,
+        'taxid': taxids,
+        'taxon_removal_cycle': cycles,
+        'GC content': np.argmax(ref_all, axis=0).astype(float),
+        'abundance_eff': br_ab,
+    }).set_index('taxid', drop=False)
+
+    out_path = str(tmp_path / "sample.guaca")
+    pdf_path = save_diagnostic_plots(
+        out_path, diag, ab_df, eff / np.nanmax(eff),
+        excessive_removal_detected=False, include_iterations=True,
+    )
+    assert pdf_path == str(tmp_path / "sample_plots.pdf")
+    assert (tmp_path / "sample_plots.pdf").stat().st_size > 1000
+

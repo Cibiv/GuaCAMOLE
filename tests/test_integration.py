@@ -85,3 +85,6 @@ def test_guacamole_metrics(demo_env):
     assert (abundances >= 0.03).all(), f"Some abundances are < 3%:\n{df[abundances < 0.03]}"
     assert (abundances <= 0.12).all(), f"Some abundances are > 12%:\n{df[abundances > 0.12]}"
     assert np.sum(df['fraction_total_reads']) == pytest.approx(1.0, abs=0.01)
+
+    plot_pdf = os.path.join(out_dir, "SRR12996245.1pct_plots.pdf")
+    assert os.path.exists(plot_pdf), f"Diagnostic PDF {plot_pdf} was not created"

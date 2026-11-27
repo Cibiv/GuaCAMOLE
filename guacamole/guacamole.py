@@ -4,7 +4,6 @@ import sys
 from datetime import datetime
 from time import localtime, strftime
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -20,6 +19,7 @@ from guacamole.distributions import (
     load_gc_distributions,
 )
 from guacamole.io import check_excessive_removal, write_output
+from guacamole.plotting import save_diagnostic_plots
 
 np.seterr(divide='ignore', invalid='ignore')
 
@@ -204,21 +204,16 @@ def main():
     np.savetxt(f'sample_bin_{nbin}_input.dist', s_dists)
 
     # ---- Run GuaCAMOLE core algorithm ----
-    if plot:
-        norm, _, _ = lib.normalize_gc_dists(s_dists, refdists, quantiles=quantiles)
-        lib.plot_dist2(norm, line=True)
-        plt.savefig(f'Obs_vs_exp_tresh_{threshold}.pdf')
-        plt.close()
-
-    ab, taxon_removal_cycle, efficiencies = lib.corrected_abundances(
+    ab, taxon_removal_cycle, efficiencies, diagnostics = lib.corrected_abundances(
         s_dists,
         refdists,
         quantiles=quantiles,
         fp_cycles=fp_cycles,
         taxids=cols_sorted,
-        plot=plot,
+        plot=False,
         reg_weight=reg_weight,
         verbose=verbose,
+        return_diagnostics=True,
     )
 
     ab[np.isinf(ab)] = np.nan
@@ -297,6 +292,18 @@ def main():
 
     # ---- Write output ----
     write_output(output, lvl_taxids, ab_df, sum_all_reads, level, excessive_removal_detected)
+
+    # ---- Generate diagnostic report PDF if requested ----
+    if plot:
+        pdf_path = save_diagnostic_plots(
+            output_path=output,
+            diagnostics=diagnostics,
+            ab_df=ab_df,
+            efficiencies=efficiencies,
+            excessive_removal_detected=excessive_removal_detected,
+            include_iterations=verbose,
+        )
+        print(f"Saved diagnostic plots to {pdf_path}")
 
     # ---- Report timing ----
     time_end = strftime("%m-%d-%Y %H:%M:%S", localtime())

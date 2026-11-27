@@ -1,7 +1,6 @@
 import bz2
 import gzip
 import json
-import os
 import random
 from contextlib import ExitStack
 from datetime import datetime
@@ -390,7 +389,7 @@ def _solve_abundances_qp(norm_sub, sample_sub, reg_weight):
 
 
 def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=None, plot=False, reg_weight=0.1,
-                         fp_cycles=3, verbose=False):
+                         fp_cycles=3, verbose=False, return_diagnostics=False):
     """Estimate GC-bias-corrected species abundances and sequencing efficiencies.
 
     Parameters
@@ -404,18 +403,24 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
     taxids : sequence of int, optional
         Taxonomy IDs corresponding to matrix columns.
     plot : bool
-        Generate diagnostic PDF plots if True.
+        Deprecated per-iteration plot flag (plotting is handled cleanly via
+        ``guacamole.plotting.save_diagnostic_plots``).
     reg_weight : float
         Regularization strength ``r`` in ``[0, 1]``.
     fp_cycles : int
         Number of false-positive removal threshold cycles.
     verbose : bool
         Write per-iteration JSON files if True.
+    return_diagnostics : bool
+        If True, return a 4th element containing diagnostic arrays and
+        per-round history for plotting.
 
     Returns
     -------
     tuple
-        ``(all_ab, taxon_removal_cycle, efficiencies)``.
+        ``(all_ab, taxon_removal_cycle, efficiencies)`` or
+        ``(all_ab, taxon_removal_cycle, efficiencies, diagnostics)`` when
+        ``return_diagnostics=True``.
     """
     norm_dist, ref_dist, sample_dist = normalize_gc_dists(
         sample_path, reference_path, trim=True, quantiles=quantiles
@@ -424,26 +429,35 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
     n_bins, n_total = norm_dist.shape
     taxids = np.arange(n_total) if taxids is None else np.asarray(taxids)
     skipped_taxids = []
-    cov_rel = np.zeros(norm_dist.shape, dtype=float)
+    cov_rel = np.full(norm_dist.shape, np.nan, dtype=float)
     taxon_removal_cycle = np.full(len(taxids), np.nan, dtype=float)
-    res_range = np.zeros(len(taxids), dtype=float)
+    res_range = np.full(len(taxids), np.nan, dtype=float)
+    history = []
 
     if fp_cycles <= 0:
         ind = np.arange(len(taxids))
         ab = _solve_abundances_qp(norm_dist, sample_dist, reg_weight)
-        _, cov_rel, efficiencies = get_residuals(
+        res_range, cov_rel, efficiencies = get_residuals(
             ref_dists=ref_dist,
             sample_dists=sample_dist,
             abundances=ab,
-            plot=plot,
+            plot=False,
             iteration=1,
         )
-        if plot:
-            residual_plot(res_array=cov_rel, taxids=taxids, threshold_plot=None)
-            plt.savefig('Residuals_final.pdf')
-            plt.close()
-            if os.path.exists('Efficiencies_it_1.pdf'):
-                os.replace('Efficiencies_it_1.pdf', 'efficiencies_final.pdf')
+        if return_diagnostics:
+            diagnostics = {
+                'norm_dist': norm_dist,
+                'ref_dist': ref_dist,
+                'sample_dist': sample_dist,
+                'taxids': taxids,
+                'final_ind': ind,
+                'final_ab': ab,
+                'final_residuals': cov_rel,
+                'final_res_range': res_range,
+                'final_threshold': None,
+                'history': history,
+            }
+            return ab, taxon_removal_cycle, efficiencies, diagnostics
         return ab, taxon_removal_cycle, efficiencies
 
     threshold = 10.0
@@ -452,10 +466,10 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
     rep = 1
     ind_skip = []
     need_solve = True
+    ind = np.arange(len(taxids))
     ab = np.array([], dtype=float)
     efficiencies = np.full(n_bins, np.nan, dtype=float)
     res_range_new = np.array([], dtype=float)
-    last_eff_plot_it = None
 
     while threshold >= final_threshold or len(ind_skip) != 0:
         ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
@@ -467,29 +481,30 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
         # Only re-solve QP and recompute efficiencies/residuals when taxa changed or on initial round
         if need_solve:
             ab = _solve_abundances_qp(norm_dist[:, ind], sample_dist[:, ind], reg_weight)
-
-            if plot:
-                plt.figure(figsize=cm2inch(20, 13))
-                plt.rcParams.update({'font.size': 16})
-                plot_dist2(norm_dist[:, ind] / ab, line=True)
-                plt.xlabel("GC bin (%)")
-                plt.ylabel("Obs / (Exp*Abundance)")
-                plt.savefig(f"Obs_vs_Exp_minimized_it_{iteration}_rep_{rep}.pdf")
-                plt.close()
-
             res_range_new, cov_rel[:, ind], efficiencies = get_residuals(
                 ref_dists=ref_dist[:, ind],
                 sample_dists=sample_dist[:, ind],
                 abundances=ab,
-                plot=plot,
+                plot=False,
                 iteration=iteration,
             )
-            if plot:
-                last_eff_plot_it = iteration
             res_range[ind] = res_range_new
             need_solve = False
 
         ind_skip = np.where(res_range_new > threshold)[0]
+
+        if return_diagnostics and len(ind_skip) > 0:
+            history.append({
+                'iteration': iteration,
+                'rep': rep,
+                'threshold': threshold,
+                'ind': ind.copy(),
+                'ab': ab.copy(),
+                'efficiencies': efficiencies.copy(),
+                'residuals': cov_rel[:, ind].copy(),
+                'res_range': res_range_new.copy(),
+                'removed_idx': ind_skip.copy(),
+            })
 
         if verbose:
             max_ef = float(np.nanmax(efficiencies)) if len(efficiencies) > 0 else 0.0
@@ -519,14 +534,6 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
         print(f"and with threshold {threshold}")
 
         if threshold == final_threshold and len(ind_skip) == 0:
-            if plot:
-                residual_plot(res_array=cov_rel[:, ind], taxids=taxids[ind], threshold_plot=None)
-                plt.savefig('Residuals_final.pdf')
-                plt.close()
-                if last_eff_plot_it is not None:
-                    eff_pdf = f'Efficiencies_it_{last_eff_plot_it}.pdf'
-                    if os.path.exists(eff_pdf):
-                        os.replace(eff_pdf, 'efficiencies_final.pdf')
             break
 
         rep += 1
@@ -548,6 +555,21 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
     kept_mask = np.isin(taxids, skipped_taxids, invert=True)
     if len(ab) == np.sum(kept_mask):
         all_ab[kept_mask] = ab
+
+    if return_diagnostics:
+        diagnostics = {
+            'norm_dist': norm_dist,
+            'ref_dist': ref_dist,
+            'sample_dist': sample_dist,
+            'taxids': taxids,
+            'final_ind': np.flatnonzero(kept_mask),
+            'final_ab': ab,
+            'final_residuals': cov_rel,
+            'final_res_range': res_range,
+            'final_threshold': final_threshold,
+            'history': history,
+        }
+        return all_ab, taxon_removal_cycle, efficiencies, diagnostics
     return all_ab, taxon_removal_cycle, efficiencies
 
 

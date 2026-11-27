@@ -146,7 +146,7 @@ guacamole --kraken_report path/to/kraken_report --kraken_file path/to/kraken_fil
 - `--read_files`: Path to input read files (required)
 - `--threshold`: Minimum number of reads found for a species to estimate its abundance, default=500
 - `--length_correction`: Enable genome size correction (taxonomic vs. read abundance)
-- `--plot`: Generate detailed plots
+- `--plot`: Generate a diagnostic summary PDF (`<output_stem>_plots.pdf`; includes per-cycle FP removal pages when combined with `--verbose`)
 - `--fp_cycles`: Number of iterations for false positive removal, default=5
 - `--reg_weight`: Determines how strong the regularization should be [between 0 and 1], default=0.01
 - `--fragment_len`: Length of the fragment if paired end and known, default=None
