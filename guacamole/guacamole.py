@@ -1,24 +1,33 @@
+import argparse
 import os
 import sys
-import argparse
+from datetime import datetime
+from time import localtime, strftime
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from time import localtime, strftime
-from datetime import datetime
 
 import guacamole.library as lib
-from guacamole.bracken import parse_kraken_report, parse_kmer_distributions, redistribute_reads
-from guacamole.distributions import get_sample_dists, get_genome_length, load_gc_distributions
-from guacamole.io import write_output, check_excessive_removal
+from guacamole.bracken import (
+    parse_kmer_distributions,
+    parse_kraken_report,
+    redistribute_reads,
+)
+from guacamole.distributions import (
+    get_genome_length,
+    get_sample_dists,
+    load_gc_distributions,
+)
+from guacamole.io import check_excessive_removal, write_output
 
 np.seterr(divide='ignore', invalid='ignore')
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Run GuaCAMOLE for GC aware species abundance estimation from metagenomic data')
+        description='Run GuaCAMOLE for GC aware species abundance estimation from metagenomic data'
+    )
 
     parser.add_argument('--kraken_report', metavar='kraken_report', type=str,
                         help='.report file from Kraken2 output')
@@ -52,7 +61,7 @@ def parse_args():
                         help='True if reads are in fasta format, false if fastq')
     parser.add_argument('--quantiles', metavar='quantiles', type=float,
                         help='min and max quantiles for GC distributions',
-                        nargs=2, default=[0.025, 0.975])
+                        nargs=2, default=[0.05, 0.95])
     parser.add_argument('--verbose', action='store_true',
                         help='Write per-iteration metrics (abundances, efficiencies, residuals) to output files '
                              'for diagnostic visualization')
@@ -80,67 +89,67 @@ def main():
     verbose = args.verbose
 
     if len(args.read_files) == 2:
-        fastq1 = args.read_files[0]
-        fastq2 = args.read_files[1]
+        fastq1, fastq2 = args.read_files
     elif len(args.read_files) == 1:
         fastq1 = args.read_files[0]
         fastq2 = None
+    else:
+        raise ValueError(f"--read_files expects 1 or 2 files, got {len(args.read_files)}")
 
     nbin = 100
-    kmer_distr = os.path.join(kraken_db, 'database' + str(read_len) + 'mers.kmer_distrib')
+    kmer_distr = os.path.join(kraken_db, f'database{read_len}mers.kmer_distrib')
 
     time_start = strftime("%m-%d-%Y %H:%M:%S", localtime())
-    sys.stdout.write("PROGRAM START TIME: " + time_start + '\n')
+    sys.stdout.write(f"PROGRAM START TIME: {time_start}\n")
 
     # ---- Parse kraken report and build taxonomy tree ----
-    (root_node, all_nodes, lvl_taxids, map2lvl_taxids, desired_lvl_dct,
-     est_reads_dct, total_reads, kept_reads, ignored_reads,
-     n_lvl_total, n_lvl_est, n_lvl_del) = parse_kraken_report(report, level, threshold)
+    (
+        root_node, all_nodes, lvl_taxids, map2lvl_taxids, _desired_lvl_dct,
+        est_reads_dct, _total_reads, _kept_reads, _ignored_reads,
+        _n_lvl_total, _n_lvl_est, _n_lvl_del,
+    ) = parse_kraken_report(report, level, threshold)
 
     # ---- Parse kmer distributions ----
     kmer_distr_dict = parse_kmer_distributions(kmer_distr, lvl_taxids, map2lvl_taxids)
 
-    # ---- Load GC distributions ----
-    gc_dists, insert = load_gc_distributions(kraken_db, nbin, read_len, fragment_len)
+    # ---- Load GC distributions (keep raw DF if length_correction is needed) ----
+    gc_dists, insert, gc_dists_raw = load_gc_distributions(
+        kraken_db, nbin, read_len, fragment_len, return_raw=True
+    )
 
     # ---- Initialize distribution weights ----
-    distribution_weights = {}
-    for taxid in map2lvl_taxids:
-        distribution_weights[taxid] = {}
+    distribution_weights = {taxid: {} for taxid in map2lvl_taxids}
 
     # ---- Redistribute reads (Bracken-style) ----
     reference_nodes, est_reads_dct = redistribute_reads(
         root_node, level, kmer_distr_dict, map2lvl_taxids, lvl_taxids,
-        gc_dists, distribution_weights
+        gc_dists, distribution_weights,
     )
 
     if len(lvl_taxids) == 0:
-        return None
+        return
 
     # ---- Build reference distributions ----
-    refdists = get_sample_dists(
+    refdists_dict = get_sample_dists(
         sdists=reference_nodes, weights=distribution_weights,
         map2lvl_taxids=map2lvl_taxids, lvl_taxids=lvl_taxids,
-        reference=True, gc_dists=gc_dists, kraken_db=kraken_db
+        reference=True, gc_dists=gc_dists, kraken_db=kraken_db,
     )
 
-    df = pd.DataFrame(refdists)
-    cols_int = [int(col) for col in df.columns]
-    cols_sorted = sorted(cols_int)
+    cols_sorted = sorted(int(col) for col in refdists_dict)
     cols_str = [str(col) for col in cols_sorted]
-    df = df.reindex(cols_str, axis=1)
-    refdists = np.array(df)
+    refdists = np.column_stack([refdists_dict[col] for col in cols_str])
     ref_normalized = refdists.copy()
 
     # ---- Create sample distributions ----
-    taxids = np.array([int(node) for node in all_nodes])
-    taxids = np.append(taxids, 1)  # add root node
-    taxids = np.sort(taxids)
+    taxids = np.array([int(node) for node in all_nodes], dtype=int)
+    taxids = np.sort(np.append(taxids, 1))  # add root node
 
-    if not os.path.exists('sample_bin_' + str(nbin) + '.dist'):
-        time = strftime("%m-%d-%Y %H:%M:%S", localtime())
-        print("Starting to create sample distribution at " + time)
-        if fragment_len is not None:
+    sample_dist_file = f'sample_bin_{nbin}.dist'
+    if not os.path.exists(sample_dist_file):
+        cur_time = strftime("%m-%d-%Y %H:%M:%S", localtime())
+        print(f"Starting to create sample distribution at {cur_time}")
+        if fragment_len is not None and fastq2 is not None:
             lib.create_sample_dist_avg(
                 fastq1=fastq1, fastq2=fastq2, txids=taxids, kraken=kraken, fasta=fasta
             )
@@ -148,120 +157,123 @@ def main():
             lib.create_sample_dist(
                 fastq1=fastq1, fastq2=fastq2, txids=taxids, kraken=kraken, fasta=fasta
             )
-        time = strftime("%m-%d-%Y %H:%M:%S", localtime())
-        print("Done at " + time)
+        cur_time = strftime("%m-%d-%Y %H:%M:%S", localtime())
+        print(f"Done at {cur_time}")
 
-    sdist = pd.read_csv('sample_bin_' + str(nbin) + '.dist', sep='\t', header=0)
-    newcols = np.array(sdist.columns)
-    newcols[0] = newcols[0][2:]
-    col_dct = dict(zip(np.array(sdist.columns), newcols))
-    sdist.rename(columns=col_dct, inplace=True)
+    sdist = pd.read_csv(sample_dist_file, sep='\t', header=0)
+    first_col = sdist.columns[0]
+    if first_col.startswith('# '):
+        sdist = sdist.rename(columns={first_col: first_col[2:]})
 
-    sample_dists = get_sample_dists(
+    sample_dists_dict = get_sample_dists(
         sdists=sdist, weights=distribution_weights,
         map2lvl_taxids=map2lvl_taxids, lvl_taxids=lvl_taxids,
-        kraken_db=kraken_db
+        kraken_db=kraken_db,
     )
-
-    df = pd.DataFrame(sample_dists)
-    cols_int = [int(col) for col in df.columns]
-    cols_sorted = sorted(cols_int)
-    cols_str = [str(col) for col in cols_sorted]
-    df = df.reindex(cols_str, axis=1)
-    s_dists = np.array(df)
+    s_dists = np.column_stack([sample_dists_dict[col] for col in cols_str])
 
     # ---- Apply length correction if requested ----
+    lengths = None
     if length_correction:
         lengths = get_genome_length(
             kraken_db=kraken_db, nbin=nbin, lvl_taxids=lvl_taxids,
             est_reads_dct=est_reads_dct, map2lvl_taxids=map2lvl_taxids,
-            insert=insert, read_len=read_len
+            insert=insert, read_len=read_len, gc_dists_raw=gc_dists_raw,
         )
         refdists = refdists * lengths
 
     # ---- Handle NaN taxids ----
-    nan_taxids = np.array(cols_sorted)[np.isnan(s_dists.sum(0))]
+    cols_sorted = np.array(cols_sorted, dtype=int)
+    invalid_mask = np.isnan(s_dists.sum(axis=0)) | np.isnan(refdists.sum(axis=0))
+    nan_taxids = cols_sorted[invalid_mask]
     if len(nan_taxids) != 0:
-        non_nan = np.argwhere(~np.isnan(s_dists.sum(0)))
-        non_nan = non_nan.reshape((non_nan.shape[0],))
-        s_dists = s_dists[:, non_nan]
-        refdists = refdists[:, non_nan]
-        cols_sorted = np.array(cols_sorted)[non_nan]
-        ref_normalized = ref_normalized[:, non_nan]
+        valid_mask = ~invalid_mask
+        s_dists = s_dists[:, valid_mask]
+        refdists = refdists[:, valid_mask]
+        cols_sorted = cols_sorted[valid_mask]
+        ref_normalized = ref_normalized[:, valid_mask]
         if length_correction:
-            lengths = lengths[non_nan]
+            lengths = lengths[valid_mask]
 
     # ---- Normalize and save intermediate distributions ----
-    refdists = refdists / np.sum(refdists)
-    refdists = refdists * np.sum(s_dists)
+    ref_sum = float(np.sum(refdists))
+    if ref_sum > 0:
+        refdists = refdists * (float(np.sum(s_dists)) / ref_sum)
 
-    np.savetxt('ref_bin_' + str(nbin) + '_input.dist', refdists)
-    np.savetxt('sample_bin_' + str(nbin) + '_input.dist', s_dists)
+    np.savetxt(f'ref_bin_{nbin}_input.dist', refdists)
+    np.savetxt(f'sample_bin_{nbin}_input.dist', s_dists)
 
     # ---- Run GuaCAMOLE core algorithm ----
-    norm, ref, sample = lib.normalize_gc_dists(
-        'sample_bin_' + str(nbin) + '_input.dist',
-        'ref_bin_' + str(nbin) + '_input.dist',
-        quantiles=quantiles
-    )
-
     if plot:
+        norm, _, _ = lib.normalize_gc_dists(s_dists, refdists, quantiles=quantiles)
         lib.plot_dist2(norm, line=True)
-        plt.savefig('Obs_vs_exp_tresh_' + str(threshold) + '.pdf')
+        plt.savefig(f'Obs_vs_exp_tresh_{threshold}.pdf')
         plt.close()
 
     ab, taxon_removal_cycle, efficiencies = lib.corrected_abundances(
-        'sample_bin_' + str(nbin) + '_input.dist',
-        'ref_bin_' + str(nbin) + '_input.dist',
+        s_dists,
+        refdists,
+        quantiles=quantiles,
         fp_cycles=fp_cycles,
-        taxids=cols_sorted, plot=plot,
+        taxids=cols_sorted,
+        plot=plot,
         reg_weight=reg_weight,
-        verbose=verbose
+        verbose=verbose,
     )
 
     ab[np.isinf(ab)] = np.nan
 
     # ---- Compute Bracken estimates ----
-    sum_all_reads = 0
-    ab_br = []
-    for taxid in cols_sorted:
-        [name, all_reads, lvl_reads, added_reads] = lvl_taxids[str(taxid)]
-        sum_all_reads += float(added_reads)
-        ab_br.append(float(added_reads))
-
-    bracken_ab = [reads / sum_all_reads for reads in ab_br]
+    ab_br = np.array([float(lvl_taxids[str(taxid)][3]) for taxid in cols_sorted], dtype=float)
+    sum_all_reads = float(np.sum(ab_br))
+    bracken_ab = ab_br / sum_all_reads if sum_all_reads > 0 else np.zeros_like(ab_br)
 
     if length_correction:
         corr_ab = bracken_ab / lengths
         bracken_ab = corr_ab / np.sum(corr_ab)
         if len(nan_taxids) != 0:
-            print(f"ERROR: For taxid(s) {nan_taxids} reference distributions could not be created"
-                  f"(known bug), therefore length"
-                  f" correction is not possible. Please re-run with length_correction set to False.")
+            print(
+                f"ERROR: For taxid(s) {nan_taxids} reference distributions could not be created"
+                "(known bug), therefore length"
+                " correction is not possible. Please re-run with length_correction set to False."
+            )
 
     # ---- Compute efficiency-based abundances ----
-    avg_eff = np.matmul(ref_normalized.T, efficiencies.reshape(101, 1)).flatten()
-    ab_efficiencies = (bracken_ab / avg_eff) / np.sum(bracken_ab / avg_eff)
-    gc_content = np.argmax(ref_normalized, axis=0)
+    covered_bins = np.isfinite(efficiencies) & (efficiencies > 0)
+    valid_mass = ref_normalized[covered_bins].sum(axis=0)
+    raw_avg_eff = ref_normalized[covered_bins].T @ efficiencies[covered_bins]
+    avg_eff = np.divide(
+        raw_avg_eff,
+        valid_mass,
+        out=np.full(len(cols_sorted), np.nan, dtype=float),
+        where=valid_mass > 0,
+    )
+    ab_eff_raw = np.divide(
+        bracken_ab,
+        avg_eff,
+        out=np.full(len(cols_sorted), np.nan, dtype=float),
+        where=np.isfinite(avg_eff) & (avg_eff > 0),
+    )
+    eff_sum = float(np.nansum(ab_eff_raw))
+    ab_efficiencies = (ab_eff_raw / eff_sum) if eff_sum > 0 else np.full_like(ab_eff_raw, np.nan)
+    gc_content = np.argmax(ref_normalized, axis=0).astype(float)
 
     # ---- Handle NaN taxids in output ----
     if len(nan_taxids) != 0:
-        print(f"WARNING: For taxid(s) {nan_taxids} reference distributions could not be created, "
-              f"therefore GuaCAMOLE estimates are set to nan for those!")
-        ab = np.append(ab, np.repeat(np.nan, len(nan_taxids)))
+        print(
+            f"WARNING: For taxid(s) {nan_taxids} reference distributions could not be created, "
+            "therefore GuaCAMOLE estimates are set to nan for those!"
+        )
+        n_nan = len(nan_taxids)
+        ab = np.append(ab, np.full(n_nan, np.nan))
         cols_sorted = np.append(cols_sorted, nan_taxids)
-        taxon_removal_cycle = np.append(taxon_removal_cycle, np.repeat(np.nan, len(nan_taxids)))
-        ab_efficiencies = np.append(ab_efficiencies, np.repeat(np.nan, len(nan_taxids)))
-        gc_content = np.append(gc_content, np.repeat(np.nan, len(nan_taxids)))
+        taxon_removal_cycle = np.append(taxon_removal_cycle, np.full(n_nan, np.nan))
+        ab_efficiencies = np.append(ab_efficiencies, np.full(n_nan, np.nan))
+        gc_content = np.append(gc_content, np.full(n_nan, np.nan))
 
-        sum_all_reads = 0
-        ab_br = []
-        for taxid in cols_sorted:
-            [name, all_reads, lvl_reads, added_reads] = lvl_taxids[str(taxid)]
-            sum_all_reads += float(added_reads)
-            ab_br.append(float(added_reads))
-
-        bracken_ab = [reads / sum_all_reads for reads in ab_br]
+        ab_br = np.array([float(lvl_taxids[str(taxid)][3]) for taxid in cols_sorted], dtype=float)
+        sum_all_reads = float(np.sum(ab_br))
+        bracken_ab = ab_br / sum_all_reads if sum_all_reads > 0 else np.zeros_like(ab_br)
 
     # ---- Build results DataFrame ----
     ab_df = pd.DataFrame({
@@ -270,15 +282,17 @@ def main():
         'taxid': cols_sorted,
         'taxon_removal_cycle': taxon_removal_cycle,
         'GC content': gc_content,
-        'abundance_eff': ab_efficiencies
+        'abundance_eff': ab_efficiencies,
     })
-    ab_df.set_index('taxid', inplace=True, drop=False)
+    ab_df = ab_df.set_index('taxid', drop=False)
 
     # ---- Check for excessive removal ----
     excessive_removal_detected, efficiencies = check_excessive_removal(ab_df, efficiencies)
 
     # ---- Write efficiencies ----
-    efficiencies = efficiencies / np.max(efficiencies)
+    max_eff = float(np.nanmax(efficiencies)) if np.any(np.isfinite(efficiencies)) else np.nan
+    if np.isfinite(max_eff) and max_eff > 0:
+        efficiencies = efficiencies / max_eff
     np.savetxt('efficiencies.txt', efficiencies)
 
     # ---- Write output ----
@@ -286,10 +300,12 @@ def main():
 
     # ---- Report timing ----
     time_end = strftime("%m-%d-%Y %H:%M:%S", localtime())
-    sys.stdout.write("DONE AT: " + time_end + '\n')
-    tdelta = (datetime.strptime(time_end, "%m-%d-%Y %H:%M:%S") -
-              datetime.strptime(time_start, "%m-%d-%Y %H:%M:%S"))
-    print("DURATION: " + str(tdelta.total_seconds()) + " seconds")
+    sys.stdout.write(f"DONE AT: {time_end}\n")
+    tdelta = (
+        datetime.strptime(time_end, "%m-%d-%Y %H:%M:%S")
+        - datetime.strptime(time_start, "%m-%d-%Y %H:%M:%S")
+    )
+    print(f"DURATION: {tdelta.total_seconds()} seconds")
     np.savetxt('duration_time.txt', np.array([tdelta.total_seconds()]))
 
 

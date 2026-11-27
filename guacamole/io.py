@@ -11,59 +11,51 @@ def write_output(output, lvl_taxids, ab_df, sum_all_reads, level, excessive_remo
     output : str
         Path to the output file.
     lvl_taxids : dict
-        Level taxid information with [name, all_reads, lvl_reads, added_reads].
+        Level taxid information with ``[name, all_reads, lvl_reads, est_reads]``,
+        where ``est_reads`` is the total post-redistribution read count for the taxon.
     ab_df : pd.DataFrame
-        DataFrame with abundance estimates and metadata.
+        DataFrame with abundance estimates and metadata, indexed by integer ``taxid``.
     sum_all_reads : float
-        Total number of reads across all level taxa.
+        Total number of redistributed reads across all level taxa.
     level : str
         Taxonomy level (e.g., 'S').
     excessive_removal_detected : bool
         Whether GuaCAMOLE flagged excessive taxa removal.
     """
-    o_file = open(output, 'w')
-    o_file.write(
-        'name\t' + 'taxonomy_id\t' + 'taxonomy_lvl\t' + 'kraken_assigned_reads\t' +
-        'added_reads\t' + 'new_est_reads\t' + 'fraction_total_reads\t' +
-        'Bracken_estimate\t' + 'GuaCAMOLE_estimate\t' + 'GuaCAMOLE_est_eff\t' +
-        'GC content\t' + 'Taxon Removal Cycle\n'
-    )
-
-    for taxid in lvl_taxids:
-        [name, all_reads, lvl_reads, added_reads] = lvl_taxids[taxid]
-        new_all_reads = float(all_reads) + float(added_reads)
-
-        bracken_est_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_br'].iloc[0])
-        taxon_removal_cycle_val = str(
-            ab_df.loc[ab_df['taxid'] == int(taxid), 'taxon_removal_cycle'].iloc[0]
+    with open(output, 'w') as o_file:
+        o_file.write(
+            'name\ttaxonomy_id\ttaxonomy_lvl\tkraken_assigned_reads\t'
+            'added_reads\tnew_est_reads\tfraction_total_reads\t'
+            'Bracken_estimate\tGuaCAMOLE_estimate\tGuaCAMOLE_est_eff\t'
+            'GC content\tTaxon Removal Cycle\n'
         )
 
-        if excessive_removal_detected:
-            guacamole_ls_est_val = np.nan
-            guacamole_eff_est_val = np.nan
-        else:
-            guacamole_ls_est_val = float(
-                ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_ls'].iloc[0]
-            )
-            guacamole_eff_est_val = float(
-                ab_df.loc[ab_df['taxid'] == int(taxid), 'abundance_eff'].iloc[0]
-            )
+        for taxid, (name, all_reads, _lvl_reads, est_reads) in lvl_taxids.items():
+            new_est_reads = float(est_reads)
+            new_est_int = round(new_est_reads)
+            added_reads = new_est_int - int(all_reads)
+            frac_total = (new_est_reads / float(sum_all_reads)) if sum_all_reads > 0 else 0.0
 
-        gc_content_val = float(ab_df.loc[ab_df['taxid'] == int(taxid), 'GC content'].iloc[0])
+            row = ab_df.loc[int(taxid)]
+            bracken_est_val = float(row['abundance_br'])
+            taxon_removal_cycle_val = str(row['taxon_removal_cycle'])
 
-        o_file.write(name + '\t')
-        o_file.write(taxid + '\t')
-        o_file.write(level + '\t')
-        o_file.write(str(int(all_reads)) + '\t')
-        o_file.write(str(int(new_all_reads) - int(all_reads)) + '\t')
-        o_file.write(str(int(new_all_reads)) + '\t')
-        o_file.write("%0.5f\t" % (float(int(new_all_reads)) / float(int(sum_all_reads))))
-        o_file.write("%0.5f\t" % bracken_est_val)
-        o_file.write("%0.5f\t" % guacamole_ls_est_val)
-        o_file.write("%0.5f\t" % guacamole_eff_est_val)
-        o_file.write("%2.0f\t" % gc_content_val)
-        o_file.write(str(taxon_removal_cycle_val) + '\n')
-    o_file.close()
+            if excessive_removal_detected:
+                guacamole_ls_est_val = np.nan
+                guacamole_eff_est_val = np.nan
+            else:
+                guacamole_ls_est_val = float(row['abundance_ls'])
+                guacamole_eff_est_val = float(row['abundance_eff'])
+
+            gc_content_val = float(row['GC content'])
+
+            o_file.write(
+                f"{name}\t{taxid}\t{level}\t{int(all_reads)}\t{added_reads}\t"
+                f"{new_est_int}\t{frac_total:0.5f}\t"
+                f"{bracken_est_val:0.5f}\t{guacamole_ls_est_val:0.5f}\t"
+                f"{guacamole_eff_est_val:0.5f}\t{gc_content_val:2.0f}\t"
+                f"{taxon_removal_cycle_val}\n"
+            )
 
 
 def check_excessive_removal(ab_df, efficiencies):
@@ -79,7 +71,7 @@ def check_excessive_removal(ab_df, efficiencies):
     Returns
     -------
     tuple
-        (excessive_removal_detected: bool, efficiencies: np.ndarray)
+        ``(excessive_removal_detected: bool, efficiencies: np.ndarray)``
     """
     zero_guacamole_taxa_df = ab_df[ab_df['abundance_ls'] <= 1e-9]
     removed_fraction_bracken = zero_guacamole_taxa_df['abundance_br'].sum()
@@ -87,7 +79,7 @@ def check_excessive_removal(ab_df, efficiencies):
     excessive_removal_detected = False
     if removed_fraction_bracken > 0.50:
         excessive_removal_detected = True
-        efficiencies.fill(np.nan)
+        efficiencies = np.full_like(efficiencies, np.nan, dtype=float)
         warning_message = (
             f"WARNING: GuaCAMOLE assigned zero abundance to taxa representing "
             f"{removed_fraction_bracken * 100:.2f}% of the Bracken-estimated abundance. "

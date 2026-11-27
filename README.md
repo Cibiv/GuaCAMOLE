@@ -13,16 +13,16 @@ GuaCAMOLE estimates and corrects for the GC bias inherent in most metagenomic se
 
 ## Installation
 
-You can install the package directly from a folder:
-
-```bash
-pip install .
-```
-
-Or from GitHub:
+You can install the package directly from GitHub:
 
 ```bash
 pip install git+https://github.com/Cibiv/GuaCAMOLE.git
+```
+
+Or from a local clone:
+
+```bash
+pip install .
 ```
 
 To install the quadratic programming solver:
@@ -147,19 +147,22 @@ guacamole --kraken_report path/to/kraken_report --kraken_file path/to/kraken_fil
 - `--threshold`: Minimum number of reads found for a species to estimate its abundance, default=500
 - `--length_correction`: Enable genome size correction (taxonomic vs. read abundance)
 - `--plot`: Generate detailed plots
-- `--fp_cycles`: Number of iterations for false positive removal, default=4
+- `--fp_cycles`: Number of iterations for false positive removal, default=5
 - `--reg_weight`: Determines how strong the regularization should be [between 0 and 1], default=0.01
 - `--fragment_len`: Length of the fragment if paired end and known, default=None
 - `--fasta`: Enable if reads are in fasta format (default is fastq)
+- `--quantiles`: Min and max quantiles for trimming GC distributions, default=0.05 0.95
+- `--verbose`: Write per-iteration diagnostic JSON files
 
 ### Output
 
-The Output is the same as the tab-delimited Bracken output file. Three additional columns are added:
+The Output is the same as the tab-delimited Bracken output file. Additional columns are added:
 
 - `Bracken_estimate`, the abundance estimate from Bracken (if `--length_correction` is set they are genome length corrected the same as the GuaCAMOLE estimates)
 - `GuaCAMOLE_estimate`, the abundances estimated using the abundance parameter from the GuaCAMOLE algorithm
-- `GuaCMAOLE_est_eff`, the abundances computed using the estimated efficiencies by GuaCAMOLE (this does also include esimates for the taxa that were labelled as false positives by GuaCAMOLE)
-- `GC_content`, the GC content of the taxon's genome
+- `GuaCAMOLE_est_eff`, the abundances computed using the estimated efficiencies by GuaCAMOLE (this does also include estimates for the taxa that were labelled as false positives by GuaCAMOLE)
+- `GC content`, the GC content of the taxon's genome
+- `Taxon Removal Cycle`, the cycle in which the taxon was removed as a false positive (or `nan` if kept)
 
 ## References
 

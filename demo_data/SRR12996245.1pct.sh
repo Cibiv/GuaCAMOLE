@@ -15,6 +15,6 @@ exec guacamole \
 	--kraken_db ../demo_db \
 	--read_len 150 \
 	--fragment_len 400 \
-	--length_correction True \
+	--length_correction \
 	--threshold 5 \
-	--plot True
+	--plot

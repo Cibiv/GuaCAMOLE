@@ -1,14 +1,18 @@
-import pandas as pd
-import numpy as np
-from datetime import datetime
-import matplotlib.pyplot as plt
-import os
-import seaborn as sns
-import qpsolvers as qps
+import bz2
 import gzip
-import scipy
+import json
+import os
+import random
+from contextlib import ExitStack
+from datetime import datetime
 from math import floor
-from numpy.random import uniform
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import qpsolvers as qps
+import scipy.sparse
+import seaborn as sns
 
 
 def print_time():
@@ -21,187 +25,284 @@ def cm2inch(*tupl):
     inch = 2.54
     if isinstance(tupl[0], tuple):
         return tuple(i / inch for i in tupl[0])
-    else:
-        return tuple(i / inch for i in tupl)
+    return tuple(i / inch for i in tupl)
 
 
 def trim_dist(dist, quantiles=None):
-    """
-    cuts off bins on extreme ends of gc dist
-    :param dist: array with gc dist
-    :param quantiles: quantiles within which values are kept
-    :return: array with trimmed gc distribution
-    """
+    """Cut off bins on extreme ends of a 1D GC distribution.
 
+    Parameters
+    ----------
+    dist : array-like
+        1D array with GC distribution counts/probabilities.
+    quantiles : sequence of float, optional
+        Lower and upper quantiles within which values are kept.
+        Defaults to ``[0.05, 0.95]``.
+
+    Returns
+    -------
+    np.ndarray
+        Trimmed GC distribution.
+    """
     if quantiles is None:
         quantiles = [0.05, 0.95]
 
-    dist = np.array(dist)
-    cdf = np.cumsum(dist)
-    cdf = cdf / cdf[-1]
-    lower_bound = np.searchsorted(cdf, min(quantiles))
-    upper_bound = np.searchsorted(cdf, max(quantiles))
-
+    dist = np.asarray(dist, dtype=float)
     new_dist = dist.copy()
+    total = np.sum(dist)
+    if total <= 0 or np.isnan(total):
+        return new_dist
+
+    cdf = np.cumsum(dist) / total
+    lower_bound = int(np.searchsorted(cdf, min(quantiles)))
+    upper_bound = int(np.searchsorted(cdf, max(quantiles)))
+
     new_dist[:lower_bound] = 0
     new_dist[upper_bound + 1:] = 0
 
     return new_dist
 
 
+def trim_dist_matrix(dist, quantiles=None):
+    """Trim every column of a 2D GC distribution matrix to quantile bounds."""
+    if quantiles is None:
+        quantiles = [0.05, 0.95]
+
+    dist = np.asarray(dist, dtype=float)
+    if dist.ndim == 1:
+        return trim_dist(dist, quantiles=quantiles)
+
+    q_low = min(quantiles)
+    q_high = max(quantiles)
+    new_dist = dist.copy()
+    totals = np.sum(dist, axis=0)
+    for j in range(dist.shape[1]):
+        total = totals[j]
+        if total <= 0 or np.isnan(total):
+            continue
+        cdf = np.cumsum(dist[:, j]) / total
+        lower_bound = int(np.searchsorted(cdf, q_low))
+        upper_bound = int(np.searchsorted(cdf, q_high))
+        new_dist[:lower_bound, j] = 0
+        new_dist[upper_bound + 1:, j] = 0
+
+    return new_dist
+
+
+def _load_dist_array(dist_or_path):
+    """Load a distribution matrix from a file path or convert an array to 2D float64."""
+    arr = np.asarray(dist_or_path, dtype=float) if isinstance(dist_or_path, np.ndarray) else np.loadtxt(dist_or_path)
+    arr = np.asarray(arr, dtype=float)
+    if arr.ndim == 1:
+        arr = arr[:, None]
+    return arr
+
+
 def normalize_gc_dists(sample_dist, ref_dist, trim=True, quantiles=None):
-    """
-    normalizes a read gc distribution with an expected distributiom from
-    reference sequences
-    :param sample_dist: path to the sample distribution (from distribute_reads() )
-    :param ref_dist: path to the reference distribution (from get_refgenomes() )
-    :param trim: cuts off reads at extreme ends of GC dist (often outliers)
-    :param quantiles:
-    :return: matrix with the normalized distributions and reference distributions
-    """
+    """Normalize observed read GC distributions by expected reference distributions.
 
-    sample_dist = np.loadtxt(sample_dist)
-    ref_dist = np.loadtxt(ref_dist)
+    Parameters
+    ----------
+    sample_dist : str, os.PathLike, or np.ndarray
+        Path to the sample distribution file or 2D array (n_bins, n_taxa).
+    ref_dist : str, os.PathLike, or np.ndarray
+        Path to the reference distribution file or 2D array (n_bins, n_taxa).
+    trim : bool
+        If True, trim tails outside ``quantiles``.
+    quantiles : sequence of float, optional
+        Lower and upper quantiles for trimming.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        ``(norm, ref_dist, sample_dist)`` matrices of shape ``(n_bins, n_taxa)``.
+    """
+    sample_dist = _load_dist_array(sample_dist)
+    ref_dist = _load_dist_array(ref_dist)
     if trim:
-        sample_dist = np.array(pd.DataFrame(sample_dist).apply(trim_dist, result_type='broadcast',
-                                                               quantiles=quantiles))
-        ref_dist = np.array(pd.DataFrame(ref_dist).apply(trim_dist, result_type='broadcast',
-                                                         quantiles=quantiles))
-        sample_dist[np.where(ref_dist == 0)] = 0
+        sample_dist = trim_dist_matrix(sample_dist, quantiles=quantiles)
+        ref_dist = trim_dist_matrix(ref_dist, quantiles=quantiles)
+        sample_dist[ref_dist == 0] = 0
 
-    norm = sample_dist / ref_dist
-    norm[np.isinf(norm)] = 0
-    norm[np.isnan(norm)] = 0
+    norm = np.divide(
+        sample_dist,
+        ref_dist,
+        out=np.zeros_like(sample_dist, dtype=float),
+        where=ref_dist != 0,
+    )
+    norm[~np.isfinite(norm)] = 0
     return norm, ref_dist, sample_dist
 
 
 def get_overlaps(norm_dist):
-    """
-    return list of list with overlaps of gc distributions of organisms
-    :param norm_dist: matrix with normalized gc distributions of organisms
-    :return: list of lists containing arrays with pairwise overlaps of organisms
-    """
+    """Return pairwise GC-bin overlaps of organisms as a nested list."""
+    nonzero = norm_dist != 0
+    n_taxa = norm_dist.shape[1]
     overlaps = []
-    for i in range(norm_dist.shape[1]):
-        org1 = np.where(norm_dist[:, i] != 0)[0]
-        overlaps.append([])
-        for j in range(norm_dist.shape[1]):
-            org2 = np.where(norm_dist[:, j] != 0)[0]
-            overlaps[i].append([x for x in org1 if x in org2])
-
+    for i in range(n_taxa):
+        row = []
+        for j in range(n_taxa):
+            row.append(np.flatnonzero(nonzero[:, i] & nonzero[:, j]).tolist())
+        overlaps.append(row)
     return overlaps
 
 
-def get_beta(norm_dist, org1, org2, all_overlaps, reg_weight=0.1):
+def rbf(val1, val2):
+    return float(np.exp(-abs(val1 - val2)))
+
+
+def _compute_reg_coefficients(norm_dist, sample_dist=None):
+    """Compute matrix C where lambda = C @ x (Eq. 9 of Holcik et al., 2025).
+
+    If ``sample_dist`` is provided, taxon-specific efficiencies in bin g are
+    weighted by ``log(O(i, g) + 1)`` and normalized by the sum of weights
+    ``n_g = sum_i log(O(i, g) + 1)`` over taxa with nonzero ``norm_dist``.
+    Otherwise, falls back to unweighted averaging over active taxa in bin g.
     """
-    returns beta_ij for LS matrix
-    :param norm_dist: matrix with normalized gc distributions of organisms
-    :param ref_dist: reference distributions
-    :param org1: first org (index!)
-    :param org2: second org (index!)
-    :param all_overlaps: list of list as from get_overlaps()
-    :return:
-    """
-    gc = all_overlaps[org1][org2]
-    if len(gc) == 0:
-        first_term = 0
+    mask = norm_dist != 0
+    if sample_dist is not None:
+        weights = np.where(mask, np.log1p(np.maximum(sample_dist, 0.0)), 0.0)
     else:
-        first_term = -np.sum(norm_dist[gc, org1] * norm_dist[gc, org2])
+        weights = mask.astype(float)
 
-    n_b = (norm_dist != 0).sum(1)
-    regularization = 0
-    for bin_i in range(norm_dist.shape[0]):
-        for bin_j in range(norm_dist.shape[0]):
-            if abs(bin_j - bin_i) > 10 or n_b[bin_i] == 0 or n_b[bin_j] == 0:
-                continue
-            regularization += ((norm_dist[bin_i, org1] * norm_dist[bin_i, org2] / np.square(n_b[bin_i]) +
-                                norm_dist[bin_j, org1] * norm_dist[bin_j, org2] / np.square(n_b[bin_j]) -
-                                2 * norm_dist[bin_i, org1] * norm_dist[bin_j, org2] / (n_b[bin_i] * n_b[bin_j]))
-                               * rbf(bin_i, bin_j))
-
-    return (1 - reg_weight) * first_term / float(norm_dist.shape[1] ** 2) + regularization * reg_weight
+    weight_sums = weights.sum(axis=1)
+    active = weight_sums > 0
+    coeff = np.zeros_like(norm_dist, dtype=float)
+    coeff[active] = (weights[active] / weight_sums[active, None]) * norm_dist[active]
+    return coeff, active
 
 
-def get_alpha(norm_dist, org, all_overlaps, reg_weight=0.1):
-    """
-    returns alpha_i for LS matrix
-    :param norm_dist: matrix with normalized gc distributions of organisms
-    :param ref_dist: reference distributions
-    :param org: organism index (integer)
-    :param all_overlaps: list of list as from get_overlaps()
-    :return: alpha_i
-    """
+def get_beta(norm_dist, org1, org2, all_overlaps, reg_weight=0.1, sample_dist=None):
+    """Return off-diagonal quadratic-form coefficient Q[org1, org2] (Eqs. 8-10)."""
+    gc = all_overlaps[org1][org2]
+    first_term = 0.0 if len(gc) == 0 else -2.0 * float(np.sum(norm_dist[gc, org1] * norm_dist[gc, org2]))
+
+    coeff, active = _compute_reg_coefficients(norm_dist, sample_dist=sample_dist)
+    n_bins = norm_dist.shape[0]
+    idx = np.arange(n_bins)
+    diff = np.abs(idx[:, None] - idx[None, :])
+    kernel = np.where(active[:, None] & active[None, :], np.exp(-diff), 0.0)
+    laplacian = np.diag(kernel.sum(axis=1)) - kernel
+    regularization = float(2.0 * (coeff[:, org1] @ laplacian @ coeff[:, org2]))
+
+    n_taxa = norm_dist.shape[1]
+    return (1.0 - reg_weight) * first_term / float(n_taxa ** 2) + reg_weight * regularization
+
+
+def get_alpha(norm_dist, org, all_overlaps, reg_weight=0.1, sample_dist=None):
+    """Return diagonal quadratic-form coefficient Q[org, org] (Eqs. 8-10)."""
     overlaps = all_overlaps[org]
-    inner_sum = 0
-    for i in range(len(overlaps)):
-        if i == org:
+    inner_sum = 0.0
+    for i, bins in enumerate(overlaps):
+        if i == org or len(bins) == 0:
             continue
-        xsq = np.square(norm_dist[overlaps[i], org])
-        inner_sum += np.sum(xsq)
+        inner_sum += float(np.sum(np.square(norm_dist[bins, org])))
 
-    n_b = (norm_dist != 0).sum(1)
-    regularization = 0
-    for bin_i in range(norm_dist.shape[0]):
-        for bin_j in range(norm_dist.shape[0]):
-            if abs(bin_j - bin_i) > 10 or n_b[bin_i] == 0 or n_b[bin_j] == 0:
-                continue
-            reg_ij = 0
-            reg_ij += np.square(norm_dist[bin_i, org]) / np.square(n_b[bin_i])
-            reg_ij += np.square(norm_dist[bin_j, org]) / np.square(n_b[bin_j])
-            reg_ij -= (2 * norm_dist[bin_i, org] * norm_dist[bin_j, org]) / (n_b[bin_i] * n_b[bin_j])
-            regularization += reg_ij * rbf(bin_i, bin_j)
+    coeff, active = _compute_reg_coefficients(norm_dist, sample_dist=sample_dist)
+    n_bins = norm_dist.shape[0]
+    idx = np.arange(n_bins)
+    diff = np.abs(idx[:, None] - idx[None, :])
+    kernel = np.where(active[:, None] & active[None, :], np.exp(-diff), 0.0)
+    laplacian = np.diag(kernel.sum(axis=1)) - kernel
+    regularization = float(2.0 * (coeff[:, org] @ laplacian @ coeff[:, org]))
 
-    return (1 - reg_weight) * inner_sum / float(norm_dist.shape[1] ** 2) + regularization * reg_weight
+    n_taxa = norm_dist.shape[1]
+    return (1.0 - reg_weight) * (2.0 * inner_sum) / float(n_taxa ** 2) + reg_weight * regularization
 
 
-def get_matrix(norm_dist, reg_weight=0.1):
+def get_matrix(norm_dist, reg_weight=0.1, sample_dist=None):
+    """Build the quadratic programming matrix P for minimizing Eq. (10).
+
+    Constructs ``P`` such that ``0.5 * x^T P x = G_tilde(x)`` where:
+
+        G_tilde(x) = ((1 - r) / n^2) * sum_{i != j} sum_g (R_{g,i} x_i - R_{g,j} x_j)^2
+                     + r * sum_{k, l} exp(-|k - l|) * (lambda_k - lambda_l)^2
+
+    with ``lambda = C @ x`` using Eq. (9) weights ``log(O(i, g) + 1)`` when
+    ``sample_dist`` is provided.
+
+    Parameters
+    ----------
+    norm_dist : np.ndarray
+        Matrix ``R`` of shape ``(n_bins, n_taxa)`` with observed/expected ratios.
+    reg_weight : float
+        Regularization hyperparameter ``r`` in ``[0, 1]``.
+    sample_dist : np.ndarray, optional
+        Matrix ``O`` of shape ``(n_bins, n_taxa)`` with observed read counts
+        used for the ``log(O(i, g) + 1)`` weights in Eq. (9).
+
+    Returns
+    -------
+    scipy.sparse.csc_matrix
+        Symmetric positive semidefinite QP matrix ``P`` of shape ``(n_taxa, n_taxa)``.
     """
-    return matrix for no_mapping pipeline to minimize LS function
-    :param norm_dist: matrix with normalized gc distributions of organisms
-    :return: matrix
-    """
-    all_overlaps = get_overlaps(norm_dist=norm_dist)
-    a = np.zeros(len(all_overlaps))
-    for i in range(len(all_overlaps)):
-        a[i] = get_alpha(norm_dist=norm_dist, org=i, reg_weight=reg_weight,
-                         all_overlaps=all_overlaps)
+    norm_dist = np.asarray(norm_dist, dtype=float)
+    n_bins, n_taxa = norm_dist.shape
+    if n_taxa == 0:
+        return scipy.sparse.csc_matrix((0, 0), dtype=float)
 
-    b = np.zeros((len(all_overlaps), len(all_overlaps)))
-    for row in range(len(all_overlaps)):
-        for col in range(len(all_overlaps)):
+    mask = norm_dist != 0
+    m_g = mask.sum(axis=1)
 
-            if row == col:
-                b[row, col] = a[row]
+    # Pairwise agreement quadratic form G(x) = x^T Q_G x (Eq. 8)
+    # Off-diagonal: -2 * sum_g R_{g,i} * R_{g,j}
+    # Diagonal:      2 * sum_g R_{g,i}^2 * max(m_g - 1, 0)
+    q_g = -2.0 * (norm_dist.T @ norm_dist)
+    diag_g = 2.0 * np.sum((norm_dist ** 2) * np.maximum(m_g - 1, 0)[:, None], axis=0)
+    np.fill_diagonal(q_g, diag_g)
 
-            elif row > col:
-                b[row, col] = b[col, row]
+    # Regularization quadratic form R(x) = sum_{k,l} W_{k,l} (lambda_k - lambda_l)^2
+    # = 2 * lambda^T L lambda = x^T (2 * C^T L C) x (Eqs. 9 & 10)
+    coeff, active = _compute_reg_coefficients(norm_dist, sample_dist=sample_dist)
+    idx = np.arange(n_bins)
+    diff = np.abs(idx[:, None] - idx[None, :])
+    kernel = np.where(active[:, None] & active[None, :], np.exp(-diff), 0.0)
+    laplacian = np.diag(kernel.sum(axis=1)) - kernel
+    q_reg = 2.0 * (coeff.T @ laplacian @ coeff)
 
-            else:
-                b[row, col] = get_beta(norm_dist=norm_dist, reg_weight=reg_weight,
-                                       org1=row, org2=col, all_overlaps=all_overlaps)
-    return scipy.sparse.csc_matrix(b)
+    # qpsolvers minimizes 0.5 * x^T P x, so P = 2 * Q_total
+    q_total = ((1.0 - reg_weight) / float(n_taxa ** 2)) * q_g + reg_weight * q_reg
+    p_mat = 2.0 * (0.5 * (q_total + q_total.T))
+    return scipy.sparse.csc_matrix(p_mat)
 
 
 def get_efficiencies(ref_dists, sample_dists, abundances, iteration=0, plot=False):
-    np.seterr(divide='ignore')
-    lib_size = np.sum(sample_dists)
-    r_dists_scaled = abundances * ref_dists / np.sum(abundances * ref_dists)
-    ef = sample_dists / (r_dists_scaled * lib_size)
-    ef[np.isnan(ef)] = 0
-    ef[np.isinf(ef)] = 0
-    # weighted mean
-    s_dists_norm = np.log(sample_dists)
-    s_dists_norm[ef == 0] = 0
-    s_dists_norm[np.isinf(s_dists_norm)] = 0
-    ef_weights = s_dists_norm / np.sum(s_dists_norm, 1).reshape(s_dists_norm.shape[0], 1)
-    w_ef = ef * ef_weights
-    filename = 'Efficiencies_it_' + str(iteration)
-    w_ef[np.isnan(w_ef)] = 0
-    w_ef = w_ef.sum(1)
+    """Estimate GC-dependent sequencing efficiencies via Eq. (9).
+
+    Computes the ``log(O(i, g) + 1)``-weighted average of taxon-specific
+    efficiencies across active taxa in each GC bin.
+    """
+    lib_size = float(np.sum(sample_dists))
+    ab_ref = abundances * ref_dists
+    ab_ref_sum = float(np.sum(ab_ref))
+    denom_ef = (ab_ref / ab_ref_sum) * lib_size if ab_ref_sum > 0 else np.zeros_like(ab_ref)
+    ef = np.divide(
+        sample_dists,
+        denom_ef,
+        out=np.zeros_like(sample_dists, dtype=float),
+        where=denom_ef > 0,
+    )
+    ef[~np.isfinite(ef)] = 0.0
+
+    # Eq. (9): weighted mean with weights log(O(i, g) + 1)
+    weights = np.log1p(np.maximum(sample_dists, 0.0))
+    weights[ef == 0] = 0.0
+    weight_sums = weights.sum(axis=1, keepdims=True)
+    ef_weights = np.divide(
+        weights,
+        weight_sums,
+        out=np.zeros_like(weights, dtype=float),
+        where=weight_sums > 0,
+    )
+    w_ef = np.sum(ef * ef_weights, axis=1)
+
     if plot:
+        filename = f'Efficiencies_it_{iteration}'
+        max_ef = float(np.max(w_ef)) if len(w_ef) > 0 else 0.0
+        scaled_ef = (w_ef / max_ef) if max_ef > 0 else w_ef
         plt.figure(figsize=cm2inch(20, 13))
         plt.rcParams.update({'font.size': 16})
-        plot_dist2(w_ef.reshape(w_ef.shape[0], 1) / np.max(w_ef))
+        plot_dist2(scaled_ef.reshape(scaled_ef.shape[0], 1))
         plt.ylim(0, 1.1)
         plt.xlabel('GC bin [%]')
         plt.ylabel('Relative Sequencing Efficiency')
@@ -212,108 +313,226 @@ def get_efficiencies(ref_dists, sample_dists, abundances, iteration=0, plot=Fals
 
 
 def get_residuals(ref_dists, sample_dists, abundances, iteration=None, plot=False):
-    ef_mean, ef_all = get_efficiencies(ref_dists=ref_dists, sample_dists=sample_dists, abundances=abundances, plot=plot,
-                                       iteration=iteration)
+    """Compute relative residuals (O - O_hat) / O_hat and per-taxon ranges."""
+    ef_mean, _ = get_efficiencies(
+        ref_dists=ref_dists,
+        sample_dists=sample_dists,
+        abundances=abundances,
+        plot=plot,
+        iteration=iteration,
+    )
 
-    r_dists_scaled = abundances * ref_dists * ef_mean.reshape((ef_mean.shape[0], 1))
-    norm_constant = np.sum(abundances * ref_dists * ef_mean.reshape((ef_mean.shape[0], 1)))
-    expected = np.sum(sample_dists) * r_dists_scaled / norm_constant
-    expected[sample_dists == 0] = 0
+    r_dists_scaled = abundances * ref_dists * ef_mean[:, None]
+    norm_constant = float(np.sum(r_dists_scaled))
+    if norm_constant > 0:
+        expected = float(np.sum(sample_dists)) * r_dists_scaled / norm_constant
+    else:
+        expected = np.zeros_like(r_dists_scaled)
+    expected[sample_dists == 0] = 0.0
 
-    residuals = (sample_dists - expected) / expected
-    res_range = np.nanmax(residuals, axis=0) - np.nanmin(residuals, axis=0)
+    residuals = np.divide(
+        sample_dists - expected,
+        expected,
+        out=np.full_like(sample_dists, np.nan, dtype=float),
+        where=expected > 0,
+    )
+    # Handle any bins where sample_dists > 0 but expected == 0 as +inf residual
+    residuals[(sample_dists > 0) & (expected == 0)] = np.inf
+
+    res_range = np.full(residuals.shape[1], np.nan, dtype=float)
+    valid_cols = np.any(~np.isnan(residuals), axis=0)
+    if np.any(valid_cols):
+        valid_res = residuals[:, valid_cols]
+        res_range[valid_cols] = np.nanmax(valid_res, axis=0) - np.nanmin(valid_res, axis=0)
 
     return res_range, residuals, ef_mean
 
 
+def _solve_abundances_qp(norm_sub, sample_sub, reg_weight):
+    """Solve the GuaCAMOLE QP for a subset of taxa and return normalized abundances."""
+    n_taxa = norm_sub.shape[1]
+    if n_taxa == 0:
+        return np.array([], dtype=float)
+    if n_taxa == 1:
+        return np.array([1.0], dtype=float)
+
+    m = get_matrix(norm_sub, reg_weight=reg_weight, sample_dist=sample_sub)
+    p_scale = float(np.max(np.abs(m.data))) if m.nnz > 0 else 0.0
+    if p_scale <= 0.0:
+        return np.full(n_taxa, 1.0 / n_taxa, dtype=float)
+
+    # Scale P by its max magnitude so CVXOPT tolerances remain scale-invariant
+    p_scaled = m / p_scale
+    a_eq = scipy.sparse.csc_matrix(np.ones((1, n_taxa), dtype=float))
+    q_zero = np.zeros(n_taxa, dtype=float)
+    b_eq = np.array([1.0], dtype=float)
+    lb = np.zeros(n_taxa, dtype=float)
+
+    x = qps.solve_qp(
+        P=p_scaled, q=q_zero, A=a_eq, b=b_eq, solver='cvxopt', verbose=False,
+        abstol=1e-15, reltol=1e-15, lb=lb,
+    )
+    if x is None:
+        # Fallback for rank-deficient / exact-zero-objective PSD systems
+        p_reg = p_scaled + scipy.sparse.eye(n_taxa, format='csc') * 1e-12
+        x = qps.solve_qp(
+            P=p_reg, q=q_zero, A=a_eq, b=b_eq, solver='cvxopt', verbose=False,
+            abstol=1e-12, reltol=1e-12, lb=lb,
+        )
+    if x is None:
+        return np.full(n_taxa, np.nan, dtype=float)
+
+    inv_x = np.divide(1.0, x, out=np.full_like(x, np.nan, dtype=float), where=x > 0)
+    total_inv = np.nansum(inv_x)
+    if total_inv <= 0 or not np.isfinite(total_inv):
+        return np.full(n_taxa, np.nan, dtype=float)
+    return inv_x / total_inv
+
+
 def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=None, plot=False, reg_weight=0.1,
                          fp_cycles=3, verbose=False):
-    """
-    return non gc biased abundances
-    :param sample_path: path to sample distribution file
-    :param reference_path: path to reference distribution file
-    :return: lambdas (ordered by txid of organism)
-    """
-    norm_dist, ref_dist, sample_dist = normalize_gc_dists(sample_path, reference_path, trim=True,
-                                                          quantiles=quantiles)
+    """Estimate GC-bias-corrected species abundances and sequencing efficiencies.
 
+    Parameters
+    ----------
+    sample_path : str, os.PathLike, or np.ndarray
+        Path to sample distribution file or 2D array ``(n_bins, n_taxa)``.
+    reference_path : str, os.PathLike, or np.ndarray
+        Path to reference distribution file or 2D array ``(n_bins, n_taxa)``.
+    quantiles : sequence of float, optional
+        Quantile bounds for tail trimming.
+    taxids : sequence of int, optional
+        Taxonomy IDs corresponding to matrix columns.
+    plot : bool
+        Generate diagnostic PDF plots if True.
+    reg_weight : float
+        Regularization strength ``r`` in ``[0, 1]``.
+    fp_cycles : int
+        Number of false-positive removal threshold cycles.
+    verbose : bool
+        Write per-iteration JSON files if True.
+
+    Returns
+    -------
+    tuple
+        ``(all_ab, taxon_removal_cycle, efficiencies)``.
+    """
+    norm_dist, ref_dist, sample_dist = normalize_gc_dists(
+        sample_path, reference_path, trim=True, quantiles=quantiles
+    )
+
+    n_bins, n_total = norm_dist.shape
+    taxids = np.arange(n_total) if taxids is None else np.asarray(taxids)
     skipped_taxids = []
-    taxids = np.array(taxids)
-    cov_rel = np.zeros(norm_dist.shape)
-    taxon_removal_cycle = np.repeat(np.nan, len(taxids))
-    res_range = np.zeros(len(taxids))
-    threshold = 10
-    final_threshold = threshold / np.power(2, fp_cycles-1)
+    cov_rel = np.zeros(norm_dist.shape, dtype=float)
+    taxon_removal_cycle = np.full(len(taxids), np.nan, dtype=float)
+    res_range = np.zeros(len(taxids), dtype=float)
+
+    if fp_cycles <= 0:
+        ind = np.arange(len(taxids))
+        ab = _solve_abundances_qp(norm_dist, sample_dist, reg_weight)
+        _, cov_rel, efficiencies = get_residuals(
+            ref_dists=ref_dist,
+            sample_dists=sample_dist,
+            abundances=ab,
+            plot=plot,
+            iteration=1,
+        )
+        if plot:
+            residual_plot(res_array=cov_rel, taxids=taxids, threshold_plot=None)
+            plt.savefig('Residuals_final.pdf')
+            plt.close()
+            if os.path.exists('Efficiencies_it_1.pdf'):
+                os.replace('Efficiencies_it_1.pdf', 'efficiencies_final.pdf')
+        return ab, taxon_removal_cycle, efficiencies
+
+    threshold = 10.0
+    final_threshold = threshold / np.power(2.0, fp_cycles - 1)
     iteration = 1
     rep = 1
     ind_skip = []
+    need_solve = True
+    ab = np.array([], dtype=float)
+    efficiencies = np.full(n_bins, np.nan, dtype=float)
+    res_range_new = np.array([], dtype=float)
+    last_eff_plot_it = None
 
     while threshold >= final_threshold or len(ind_skip) != 0:
-
         ind = np.where(np.isin(taxids, skipped_taxids, invert=True))[0]
+        if len(ind) == 0:
+            ab = np.array([], dtype=float)
+            efficiencies = np.full(n_bins, np.nan, dtype=float)
+            break
 
-        # only re-compute matrix when taxa have been removed or it's initial round
-        if len(ind_skip) != 0 or (iteration == 1 and rep == 1):
-            m = get_matrix(norm_dist[:, ind], reg_weight=reg_weight)
+        # Only re-solve QP and recompute efficiencies/residuals when taxa changed or on initial round
+        if need_solve:
+            ab = _solve_abundances_qp(norm_dist[:, ind], sample_dist[:, ind], reg_weight)
 
-        a = scipy.sparse.csc_matrix(np.full((m.shape[0],), 1.))
-        ab = qps.solve_qp(P=m, q=np.zeros(m.shape[0]), A=a, b=np.array([1.]), solver='cvxopt', verbose=False,
-                          abstol=1e-15, reltol=1e-15, lb=np.zeros(m.shape[0]))
+            if plot:
+                plt.figure(figsize=cm2inch(20, 13))
+                plt.rcParams.update({'font.size': 16})
+                plot_dist2(norm_dist[:, ind] / ab, line=True)
+                plt.xlabel("GC bin (%)")
+                plt.ylabel("Obs / (Exp*Abundance)")
+                plt.savefig(f"Obs_vs_Exp_minimized_it_{iteration}_rep_{rep}.pdf")
+                plt.close()
 
-        ab = (1 / ab) / np.sum(1 / ab)
+            res_range_new, cov_rel[:, ind], efficiencies = get_residuals(
+                ref_dists=ref_dist[:, ind],
+                sample_dists=sample_dist[:, ind],
+                abundances=ab,
+                plot=plot,
+                iteration=iteration,
+            )
+            if plot:
+                last_eff_plot_it = iteration
+            res_range[ind] = res_range_new
+            need_solve = False
 
-        if plot:
-            plt.figure(figsize=cm2inch(20, 13))
-            plt.rcParams.update({'font.size': 16})
-            plot_dist2(norm_dist[:, ind] / ab, line=True)
-            plt.xlabel("GC bin (%)")
-            plt.ylabel("Obs / (Exp*Abundance)")
-            plt.savefig("Obs_vs_Exp_minimized_it_" + str(iteration) + '_rep_' + str(rep) + ".pdf")
-            plt.close()
-
-        res_range_new, cov_rel[:, ind], efficiencies = get_residuals(ref_dists=ref_dist[:, ind],
-                                                                     sample_dists=sample_dist[:, ind],
-                                                                     abundances=ab, plot=plot,
-                                                                     iteration=iteration)
-
-        res_range[ind] = res_range_new
         ind_skip = np.where(res_range_new > threshold)[0]
 
         if verbose:
-            import json
+            max_ef = float(np.nanmax(efficiencies)) if len(efficiencies) > 0 else 0.0
+            scaled_eff = (efficiencies / max_ef).tolist() if max_ef > 0 else efficiencies.tolist()
             iteration_data = {
                 'iteration': iteration,
                 'rep': rep,
                 'threshold': threshold,
                 'taxids': taxids[ind].tolist(),
                 'abundances': ab.tolist(),
-                'efficiencies': (efficiencies / np.max(efficiencies)).tolist(),
-                'residuals': cov_rel[:, ind].tolist(),  # shape: (n_gc_bins, n_taxa)
+                'efficiencies': scaled_eff,
+                'residuals': cov_rel[:, ind].tolist(),
                 'res_range': res_range_new.tolist(),
                 'removed_taxids': taxids[ind][ind_skip].tolist() if len(ind_skip) > 0 else [],
             }
             with open(f'iteration_{iteration}_rep_{rep}.json', 'w') as f:
                 json.dump(iteration_data, f)
 
-        skipped_taxids.extend(taxids[ind][ind_skip])
-        taxon_removal_cycle[ind[ind_skip]] = iteration
+        if len(ind_skip) > 0:
+            skipped_taxids.extend(taxids[ind][ind_skip])
+            taxon_removal_cycle[ind[ind_skip]] = iteration
+            need_solve = True
 
         print(
-            "Removing taxa " + str(taxids[ind][ind_skip]) + " in cycle " + str(iteration) + " out of " + str(fp_cycles))
-        print(f"and with threshold {str(threshold)}")
+            f"Removing taxa {taxids[ind][ind_skip]} in cycle {iteration} out of {fp_cycles}"
+        )
+        print(f"and with threshold {threshold}")
 
         if threshold == final_threshold and len(ind_skip) == 0:
             if plot:
                 residual_plot(res_array=cov_rel[:, ind], taxids=taxids[ind], threshold_plot=None)
                 plt.savefig('Residuals_final.pdf')
                 plt.close()
-                os.rename('Efficiencies_it_' + str(iteration) + '.pdf', 'efficiencies_final.pdf')
+                if last_eff_plot_it is not None:
+                    eff_pdf = f'Efficiencies_it_{last_eff_plot_it}.pdf'
+                    if os.path.exists(eff_pdf):
+                        os.replace(eff_pdf, 'efficiencies_final.pdf')
             break
 
         rep += 1
         if threshold > final_threshold and len(ind_skip) == 0:
             iteration += 1
-            threshold = threshold / 2
+            threshold = threshold / 2.0
             rep = 1
 
     if verbose:
@@ -325,9 +544,10 @@ def corrected_abundances(sample_path, reference_path, quantiles=None, taxids=Non
         with open('iteration_manifest.json', 'w') as f:
             json.dump(manifest, f)
 
-    all_ab = np.zeros(len(taxids))
-    all_ab[np.where(np.isin(taxids, skipped_taxids, invert=True))[0]] = ab
-    all_ab[np.where(np.isin(taxids, skipped_taxids))[0]] = 0
+    all_ab = np.zeros(len(taxids), dtype=float)
+    kept_mask = np.isin(taxids, skipped_taxids, invert=True)
+    if len(ab) == np.sum(kept_mask):
+        all_ab[kept_mask] = ab
     return all_ab, taxon_removal_cycle, efficiencies
 
 
@@ -341,20 +561,25 @@ def plot_dist2(dists, color=None, legend=False, line=False, **kwargs):
         {
             'gc': np.tile(np.arange(0, dists.shape[0]), dists.shape[1]),
             'y': dists.flatten('F'),
-            'org': [str(i) for i in np.repeat(np.arange(0, dists.shape[1]), dists.shape[0])]
+            'org': [str(i) for i in np.repeat(np.arange(0, dists.shape[1]), dists.shape[0])],
         }
     )
     if color is None:
         if line:
-            return sns.lineplot(x='gc', y='y', hue='org', data=dist_df.loc[dist_df['y'] != 0], legend=False,
-                                palette='deep', **kwargs)
-        return sns.scatterplot(x='gc', y='y', hue='org', style='org', data=dist_df.loc[dist_df['y'] != 0], legend=False,
-                               palette='deep', **kwargs)
+            return sns.lineplot(
+                x='gc', y='y', hue='org', data=dist_df.loc[dist_df['y'] != 0],
+                legend=False, palette='deep', **kwargs,
+            )
+        return sns.scatterplot(
+            x='gc', y='y', hue='org', style='org', data=dist_df.loc[dist_df['y'] != 0],
+            legend=False, palette='deep', **kwargs,
+        )
 
-    else:
-        dist_df['category'] = np.repeat(color, dists.shape[0])
-        return sns.lineplot(x='gc', y='y', hue='category', style='org', data=dist_df.loc[dist_df['y'] != 0],
-                            legend=legend, **kwargs)
+    dist_df['category'] = np.repeat(color, dists.shape[0])
+    return sns.lineplot(
+        x='gc', y='y', hue='category', style='org', data=dist_df.loc[dist_df['y'] != 0],
+        legend=legend, **kwargs,
+    )
 
 
 def residual_plot(res_array, taxids, threshold_plot=None):
@@ -363,133 +588,158 @@ def residual_plot(res_array, taxids, threshold_plot=None):
     taxonomy = []
     for i in range(res_array.shape[1]):
         sub_array = res_array[:, i]
-        gc_bin.extend(np.where(~np.isnan(sub_array))[0])
-        res_gc.extend(sub_array[np.where(~np.isnan(sub_array))[0]])
-        taxonomy.extend(np.repeat(taxids[i], len(np.where(~np.isnan(sub_array))[0])))
+        valid = np.where(~np.isnan(sub_array))[0]
+        gc_bin.extend(valid)
+        res_gc.extend(sub_array[valid])
+        taxonomy.extend(np.repeat(taxids[i], len(valid)))
     res_df = pd.DataFrame(
         {
             'gc': gc_bin,
             'residual': res_gc,
-            'taxid': taxonomy
+            'taxid': taxonomy,
         }
     )
     palette = sns.color_palette(['black'], len(res_df['taxid'].unique()))
     sns.lineplot(x='gc', y='residual', hue='taxid', data=res_df, legend=False, palette=palette, alpha=0.4)
-    if threshold_plot is not None:
+    if threshold_plot is not None and len(res_df) > 0:
         plt.hlines(y=threshold_plot, xmin=min(res_df['gc']), xmax=max(res_df['gc']))
     plt.ylabel('Relative Residuals')
     plt.xlabel('GC bin [%]')
 
 
-def create_sample_dist(fastq1, txids, kraken, fastq2=None, nbin=100, fasta=False):
-    denom = 4
-    j = 4
-    if fasta:
-        j = 2
-        denom = 2
-    i = 0
-
-    if fastq1[-2:] == "gz":
-        f1 = gzip.open(fastq1, 'rt')
-        if fastq2 is not None:
-            f2 = gzip.open(fastq2, 'rt')
-    else:
-        f1 = open(fastq1, 'r')
-        if fastq2 is not None:
-            f2 = open(fastq2, 'r')
-    occ = np.zeros((nbin + 1, len(txids)), dtype=int)
-    idx = dict(zip(txids, range(len(txids))))
-    kr = open(kraken, 'r')
-
-    while kr:
-        ln_fq1 = f1.readline().strip()
-        if fastq2 is not None:
-            ln_fq2 = f2.readline().strip()
-
-        if i % j == 0:
-            ln_kr = kr.readline()
-
-        if ln_fq1 == "" or ln_kr.strip() == "":
-            break
-        current_txid = ln_kr.split(sep="\t")[2]
-
-        if int(current_txid) in txids:
-            if (i - 1) % denom == 0 or i == 1:
-                gc_1 = compute_gc(ln_fq1, nbin=nbin)
-                if f2 is not None:
-                    gc_2 = compute_gc(ln_fq2, nbin=nbin)
-                    if max([gc_1, gc_2]) > nbin:
-                        i += 1
-                        continue
-                    occ[gc_2, idx[int(current_txid)]] += 1
-                if gc_1 > nbin:
-                    i += 1
-                    continue
-                occ[gc_1, idx[int(current_txid)]] += 1
-
-        i += 1
-    f1.close()
-    if f2 is not None:
-        f2.close()
-    kr.close()
-
-    header = "\t".join(map(str, txids))
-    np.savetxt("sample_bin_" + str(nbin) + ".dist", occ,
-               fmt='%i', delimiter="\t", header=header)
+def _open_read_file(path):
+    """Open plain text, gzip, or bzip2 read files in text mode."""
+    if path.endswith('.gz'):
+        return gzip.open(path, 'rt')
+    if path.endswith('.bz2'):
+        return bz2.open(path, 'rt')
+    return open(path)
 
 
 def compute_gc(seq, nbin=100):
-    gc = seq.upper().count('G') + seq.upper().count('C')
-    atgc = seq.count('A') + seq.count('T') + gc
+    """Compute dithered GC bin index for a DNA sequence (case-insensitive)."""
+    gc = seq.count('G') + seq.count('C') + seq.count('g') + seq.count('c')
+    atgc = seq.count('A') + seq.count('T') + seq.count('a') + seq.count('t') + gc
     if atgc == 0:
         return 0
-    return floor((nbin / atgc) * (gc + uniform()))
+    return floor((nbin / atgc) * (gc + random.random()))
 
 
-def rbf(val1, val2):
-    w = np.exp(-abs(val1 - val2))
-    return w
+def _compute_gc_pair(seq1, seq2, nbin=100):
+    """Compute dithered GC bin index for a concatenated read pair without copying strings."""
+    gc = (
+        seq1.count('G') + seq1.count('C') + seq1.count('g') + seq1.count('c')
+        + seq2.count('G') + seq2.count('C') + seq2.count('g') + seq2.count('c')
+    )
+    atgc = (
+        seq1.count('A') + seq1.count('T') + seq1.count('a') + seq1.count('t')
+        + seq2.count('A') + seq2.count('T') + seq2.count('a') + seq2.count('t')
+        + gc
+    )
+    if atgc == 0:
+        return 0
+    return floor((nbin / atgc) * (gc + random.random()))
+
+
+def create_sample_dist(fastq1, txids, kraken, fastq2=None, nbin=100, fasta=False):
+    """Build per-taxon read GC count histogram (treating paired reads separately)."""
+    occ = np.zeros((nbin + 1, len(txids)), dtype=int)
+    idx = {str(t): col for col, t in enumerate(txids)}
+    skip_after_seq = 0 if fasta else 2
+
+    with ExitStack() as stack:
+        f1 = stack.enter_context(_open_read_file(fastq1))
+        f2 = stack.enter_context(_open_read_file(fastq2)) if fastq2 is not None else None
+        kr = stack.enter_context(open(kraken))
+
+        f1_readline = f1.readline
+        f2_readline = f2.readline if f2 is not None else None
+        idx_get = idx.get
+
+        for ln_kr in kr:
+            header1 = f1_readline()
+            if not header1:
+                break
+            seq1 = f1_readline()
+            if not seq1:
+                break
+            if skip_after_seq:
+                f1_readline()
+                f1_readline()
+
+            if f2_readline is not None:
+                f2_readline()
+                seq2 = f2_readline()
+                if skip_after_seq:
+                    f2_readline()
+                    f2_readline()
+
+            parts = ln_kr.split("\t", 3)
+            if len(parts) < 3:
+                continue
+            col = idx_get(parts[2])
+            if col is None:
+                continue
+
+            gc_1 = compute_gc(seq1, nbin=nbin)
+            if f2_readline is not None:
+                gc_2 = compute_gc(seq2, nbin=nbin)
+                if gc_1 > nbin or gc_2 > nbin:
+                    continue
+                occ[gc_2, col] += 1
+            elif gc_1 > nbin:
+                continue
+            occ[gc_1, col] += 1
+
+    header = "\t".join(map(str, txids))
+    np.savetxt(f"sample_bin_{nbin}.dist", occ, fmt='%i', delimiter="\t", header=header)
 
 
 def create_sample_dist_avg(fastq1, txids, kraken, fastq2, nbin=100, fasta=False):
-    denom = 4
-    if fasta:
-        denom = 2
-    i = 0
-
-    if fastq1[-2:] == "gz":
-        f1 = gzip.open(fastq1, 'rt')
-        f2 = gzip.open(fastq2, 'rt')
-    else:
-        f1 = open(fastq1, 'r')
-        f2 = open(fastq2, 'r')
+    """Build per-taxon fragment GC count histogram by combining paired-end reads."""
     occ = np.zeros((nbin + 1, len(txids)), dtype=int)
-    idx = dict(zip(txids, range(len(txids))))
-    kr = open(kraken, 'r')
+    idx = {str(t): col for col, t in enumerate(txids)}
+    skip_after_seq = 0 if fasta else 2
 
-    while kr:
-        ln_fq1 = f1.readline().strip()
-        ln_fq2 = f2.readline().strip()
+    with ExitStack() as stack:
+        f1 = stack.enter_context(_open_read_file(fastq1))
+        f2 = stack.enter_context(_open_read_file(fastq2))
+        kr = stack.enter_context(open(kraken))
 
-        if i % denom == 0:
-            ln_kr = kr.readline()
+        f1_readline = f1.readline
+        f2_readline = f2.readline
+        idx_get = idx.get
 
-        if ln_fq1 == "" or ln_kr.strip() == "":
-            break
-        current_txid = ln_kr.split(sep="\t")[2]
+        for ln_kr in kr:
+            header1 = f1_readline()
+            if not header1:
+                break
+            seq1 = f1_readline()
+            if not seq1:
+                break
+            if skip_after_seq:
+                f1_readline()
+                f1_readline()
 
-        if int(current_txid) in txids:
-            if (i - 1) % denom == 0 or i == 1:
-                gc = compute_gc(ln_fq1 + ln_fq2, nbin=nbin)
-                if gc > nbin:
-                    i += 1
-                    continue
-                occ[gc, idx[int(current_txid)]] += 1
-        i += 1
-    f1.close()
-    f2.close()
-    kr.close()
+            f2_readline()
+            seq2 = f2_readline()
+            if not seq2:
+                break
+            if skip_after_seq:
+                f2_readline()
+                f2_readline()
+
+            parts = ln_kr.split("\t", 3)
+            if len(parts) < 3:
+                continue
+            col = idx_get(parts[2])
+            if col is None:
+                continue
+
+            gc = _compute_gc_pair(seq1, seq2, nbin=nbin)
+            if gc > nbin:
+                continue
+            occ[gc, col] += 1
 
     header = "\t".join(map(str, txids))
-    np.savetxt("sample_bin_" + str(nbin) + ".dist", occ,
-               fmt='%i', delimiter="\t", header=header)
+    np.savetxt(f"sample_bin_{nbin}.dist", occ, fmt='%i', delimiter="\t", header=header)
