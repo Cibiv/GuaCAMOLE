@@ -13,7 +13,25 @@ GuaCAMOLE estimates and corrects for the GC bias inherent in most metagenomic se
 
 ## Installation
 
-You can install the package directly from GitHub:
+> **Note:** Install GuaCAMOLE directly from GitHub (or Bioconda) to get the latest release. The legacy PyPI package is no longer maintained.
+
+### Using `uv` (Recommended)
+
+Install `guacamole` and `create-reference-dist` as global CLI tools:
+
+```bash
+uv tool install git+https://github.com/Cibiv/GuaCAMOLE.git
+```
+
+Or into a virtual environment:
+
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install git+https://github.com/Cibiv/GuaCAMOLE.git
+```
+
+### Using `pip`
 
 ```bash
 pip install git+https://github.com/Cibiv/GuaCAMOLE.git
@@ -25,10 +43,10 @@ Or from a local clone:
 pip install .
 ```
 
-To install the quadratic programming solver:
+### Using Bioconda
 
 ```bash
-pip install qpsolvers['cvxopt']
+conda install -c bioconda guacamole-bio
 ```
 
 ## Testing
